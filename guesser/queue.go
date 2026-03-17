@@ -2,6 +2,8 @@ package guesser
 
 import (
 	"container/heap"
+	"runtime"
+	"sync"
 	"sync/atomic"
 
 	pcfg "github.com/cyclone-github/pcfg-go/shared"
@@ -80,21 +82,21 @@ func newPcfgQueueWithSave(grammar pcfg.Grammar, base []pcfg.BaseStructure, minPr
 
 	heap.Init(&q.pq)
 
-	for _, b := range base {
-		pt := make([]pcfg.PTNode, len(b.Replacements))
-		for i, r := range b.Replacements {
-			pt[i] = pcfg.PTNode{Type: r, Index: 0}
-		}
-
-		prob := findProb(grammar, pt, b.Prob)
-		item := pcfg.PTItem{
-			Prob:     prob,
-			PT:       pt,
-			BaseProb: b.Prob,
-		}
-		if minProb > 0 || maxProb < 1 {
-			restoreProbOrder(q, grammar, &item, minProb, maxProb)
-		} else {
+	if minProb > 0 || maxProb < 1 {
+		// Restore: run tree traversal in parallel across base structures
+		restoreProbOrderParallel(q, grammar, base, minProb, maxProb)
+	} else {
+		for _, b := range base {
+			pt := make([]pcfg.PTNode, len(b.Replacements))
+			for i, r := range b.Replacements {
+				pt[i] = pcfg.PTNode{Type: r, Index: 0}
+			}
+			prob := findProb(grammar, pt, b.Prob)
+			item := pcfg.PTItem{
+				Prob:     prob,
+				PT:       pt,
+				BaseProb: b.Prob,
+			}
 			seq := q.seqCounter.Add(1)
 			heap.Push(&q.pq, &queueItem{item: item, seq: seq})
 		}
@@ -103,22 +105,80 @@ func newPcfgQueueWithSave(grammar pcfg.Grammar, base []pcfg.BaseStructure, minPr
 	return q
 }
 
-// recursively restores queue items in [minProb, maxProb]
-func restoreProbOrder(q *PcfgQueue, grammar pcfg.Grammar, ptItem *pcfg.PTItem, minProb, maxProb float64) {
+// restoreProbOrderParallel runs restore per base structure in parallel, then merges.
+func restoreProbOrderParallel(q *PcfgQueue, grammar pcfg.Grammar, base []pcfg.BaseStructure, minProb, maxProb float64) {
+	numWorkers := runtime.NumCPU()
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+	if numWorkers > len(base) {
+		numWorkers = len(base)
+	}
+
+	type work struct {
+		b pcfg.BaseStructure
+	}
+	workCh := make(chan work, len(base))
+	for _, b := range base {
+		workCh <- work{b: b}
+	}
+	close(workCh)
+
+	var mu sync.Mutex
+	var allItems []pcfg.PTItem
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			local := make([]pcfg.PTItem, 0, 4096)
+			for w := range workCh {
+				pt := make([]pcfg.PTNode, len(w.b.Replacements))
+				for i, r := range w.b.Replacements {
+					pt[i] = pcfg.PTNode{Type: r, Index: 0}
+				}
+				prob := findProb(grammar, pt, w.b.Prob)
+				item := pcfg.PTItem{
+					Prob:     prob,
+					PT:       pt,
+					BaseProb: w.b.Prob,
+				}
+				restoreProbOrderToSlice(grammar, &item, minProb, maxProb, func(it *pcfg.PTItem) {
+					local = append(local, *it)
+				})
+			}
+			if len(local) > 0 {
+				mu.Lock()
+				allItems = append(allItems, local...)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	for i := range allItems {
+		it := &allItems[i]
+		seq := q.seqCounter.Add(1)
+		heap.Push(&q.pq, &queueItem{item: *it, seq: seq})
+	}
+}
+
+// restoreProbOrderToSlice collects items in [minProb, maxProb] via callback (no shared state).
+func restoreProbOrderToSlice(grammar pcfg.Grammar, ptItem *pcfg.PTItem, minProb, maxProb float64, collect func(*pcfg.PTItem)) {
 	prob := ptItem.Prob
 	if prob < minProb {
 		return
 	}
 	if prob <= maxProb {
 		if !isParentInQueue(grammar, ptItem, maxProb) {
-			seq := q.seqCounter.Add(1)
-			heap.Push(&q.pq, &queueItem{item: *ptItem, seq: seq})
+			collect(ptItem)
 		}
 		return
 	}
 	children := findChildren(grammar, ptItem)
-	for _, child := range children {
-		restoreProbOrder(q, grammar, &child, minProb, maxProb)
+	for i := range children {
+		restoreProbOrderToSlice(grammar, &children[i], minProb, maxProb, collect)
 	}
 }
 

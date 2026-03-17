@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -22,16 +23,18 @@ type SessionConfig struct {
 	ProbCoverage   float64
 	RunningTime    int64
 	OmenGuessNum   int64
+	FirstStarted   string // RFC3339, preserved when resuming
 }
 
 // read .sav file, return nil if file doesn't exist or is invalid
 func LoadSession(path string) (*SessionConfig, error) {
+	path = filepath.Clean(path)
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil // file missing is not an error, caller starts fresh
 		}
-		return nil, err
+		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
 
@@ -76,6 +79,8 @@ func LoadSession(path string) (*SessionConfig, error) {
 				}
 			case "session_info":
 				switch key {
+				case "first_started":
+					cfg.FirstStarted = val
 				case "num_guesses":
 					cfg.NumGuesses, _ = strconv.ParseInt(val, 10, 64)
 				case "num_parse_trees":
@@ -92,8 +97,8 @@ func LoadSession(path string) (*SessionConfig, error) {
 	return cfg, scanner.Err()
 }
 
-// write .sav file
-func SaveSession(path string, cfg *SessionConfig, ruleName, uuid string, skipBrute, skipCase bool) error {
+// write .sav file. firstStarted is preserved from load; use "" for new sessions.
+func SaveSession(path string, cfg *SessionConfig, ruleName, uuid string, skipBrute, skipCase bool, firstStarted string) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -112,7 +117,11 @@ func SaveSession(path string, cfg *SessionConfig, ruleName, uuid string, skipBru
 
 	// session_info
 	fmt.Fprintln(w, "[session_info]")
-	fmt.Fprintf(w, "first_started = %s\n", time.Now().Format(time.RFC3339))
+	if firstStarted != "" {
+		fmt.Fprintf(w, "first_started = %s\n", firstStarted)
+	} else {
+		fmt.Fprintf(w, "first_started = %s\n", time.Now().Format(time.RFC3339))
+	}
 	fmt.Fprintf(w, "last_updated = %s\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(w, "num_guesses = %d\n", cfg.NumGuesses)
 	fmt.Fprintf(w, "num_parse_trees = %d\n", cfg.NumParseTrees)

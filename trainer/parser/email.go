@@ -1,6 +1,9 @@
 package parser
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 func detectEmail(section Section) ([]Section, string, string) {
 	working := strings.ToLower(section.Value)
@@ -23,8 +26,13 @@ func detectEmail(section Section) ([]Section, string, string) {
 			continue
 		}
 
+		// extract provider using rune boundaries for multi-byte safety
+		providerBytes := working[markerIndex+1 : endIndex]
+		if !utf8.ValidString(providerBytes) {
+			continue
+		}
+		provider := string([]rune(providerBytes))
 		found := working[0:endIndex]
-		provider := working[markerIndex+1 : endIndex]
 
 		var parsing []Section
 		parsing = append(parsing, Section{Value: section.Value[0:endIndex], Type: "E"})

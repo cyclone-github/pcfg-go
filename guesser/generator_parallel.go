@@ -45,6 +45,10 @@ type ParallelGuessGenerator struct {
 	numParseTrees atomic.Int64
 	probCoverage  atomic.Int64 // scaled by 1e15 for precision
 	startTime     time.Time
+
+	// from previous session when resuming with -l (accumulated stats)
+	prevRunningTime    int64
+	originalFirstStarted string // RFC3339, preserved when resuming
 }
 
 // creates a generator that uses parallel workers
@@ -73,13 +77,35 @@ func NewParallelGuessGeneratorWithQueue(grammar pcfg.Grammar, base []pcfg.BaseSt
 	}
 }
 
-// generates guesses using all CPU cores
-func (g *ParallelGuessGenerator) RunParallel(limit int64) (int64, error) {
-	return g.runParallelWithCtx(context.Background(), limit)
+// creates a generator with a pre-built queue and restores accumulated stats from a previous session
+func NewParallelGuessGeneratorWithQueueAndRestore(grammar pcfg.Grammar, base []pcfg.BaseStructure, queue *PcfgQueue, omenGrammar *omen.Grammar, debug bool, sav *SessionConfig) *ParallelGuessGenerator {
+	g := &ParallelGuessGenerator{
+		Grammar:              grammar,
+		Base:                 base,
+		Queue:                queue,
+		Debug:                debug,
+		OmenGrammar:          omenGrammar,
+		outputChan:           make(chan []byte, outputChanSize),
+		startTime:            time.Now(),
+		prevRunningTime:      sav.RunningTime,
+		originalFirstStarted: sav.FirstStarted,
+	}
+	g.totalGuesses.Store(sav.NumGuesses)
+	g.numParseTrees.Store(sav.NumParseTrees)
+	return g
 }
 
-// runs with session save/load. On Ctrl+C, saves and exits gracefully
+// generates guesses using all CPU cores
+func (g *ParallelGuessGenerator) RunParallel(limit int64) (int64, error) {
+	return g.runParallelWithCtx(context.Background(), limit, nil)
+}
+
+// runs with session save/load. On Ctrl+C, saves and exits gracefully.
+// Save runs on every exit path: normal completion, signal (SIGINT/SIGTERM), or panic.
 func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, ruleName, ruleUUID string, skipBrute, skipCase bool) (int64, error) {
+	// Ignore SIGPIPE so piping to pv, head, etc. doesn't kill us before save on Ctrl+C
+	signal.Ignore(syscall.SIGPIPE)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -90,24 +116,28 @@ func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, r
 		cancel()
 	}()
 
-	total, err := g.runParallelWithCtx(ctx, limit)
+	// Always save on exit: normal, signal, or panic. Works for first run and -l (load).
+	defer func() {
+		currentRunTime := int64(time.Since(g.startTime).Seconds())
+		cfg := &SessionConfig{
+			NumGuesses:     g.totalGuesses.Load(),
+			NumParseTrees:  g.numParseTrees.Load(),
+			ProbCoverage:   0,
+			RunningTime:    g.prevRunningTime + currentRunTime,
+			MinProbability: g.Queue.MinProbability,
+			MaxProbability: g.Queue.MaxProbability,
+		}
+		if saveErr := SaveSession(savePath, cfg, ruleName, ruleUUID, skipBrute, skipCase, g.originalFirstStarted); saveErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", saveErr)
+		} else {
+			fmt.Fprintf(os.Stderr, "Session saved to %s\n", savePath)
+		}
+	}()
 
-	// save session on exit (normal or signal)
-	cfg := &SessionConfig{
-		NumGuesses:     g.totalGuesses.Load(),
-		NumParseTrees:  g.numParseTrees.Load(),
-		ProbCoverage:   0,
-		RunningTime:    int64(time.Since(g.startTime).Seconds()),
-		MinProbability: g.Queue.MinProbability,
-		MaxProbability: g.Queue.MaxProbability,
-	}
-	if saveErr := SaveSession(savePath, cfg, ruleName, ruleUUID, skipBrute, skipCase); saveErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", saveErr)
-	}
-	return total, err
+	return g.runParallelWithCtx(ctx, limit, cancel)
 }
 
-func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit int64) (int64, error) {
+func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit int64, cancelOnPipe func()) (int64, error) {
 	numWorkers := runtime.NumCPU()
 	if numWorkers < 1 {
 		numWorkers = 1
@@ -118,12 +148,16 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 	var wg sync.WaitGroup
 
 	// writer goroutine: consume batches from outputChan
+	// on broken pipe (e.g. pv exits), cancel so we save instead of spinning
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		defer writer.Flush()
 		for buf := range g.outputChan {
-			writer.Write(buf)
+			if _, err := writer.Write(buf); err != nil && cancelOnPipe != nil {
+				// broken pipe, reader exited - cancel to trigger save
+				cancelOnPipe()
+			}
 		}
 	}()
 

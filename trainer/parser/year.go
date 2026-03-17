@@ -1,6 +1,9 @@
 package parser
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 var yearPrefixes = []string{"19", "20"}
 
@@ -23,17 +26,20 @@ func detectYear(section Section) ([]Section, string) {
 			start = startIndex + 2
 
 			if startIndex != 0 {
-				if isDigit(rune(working[startIndex-1])) {
+				r, _ := utf8.DecodeLastRuneInString(working[:startIndex])
+				if isDigit(r) {
 					continue
 				}
 			}
 
 			if startIndex+4 < len(working) {
-				if isDigit(rune(working[startIndex+4])) {
+				r, _ := utf8.DecodeRuneInString(working[startIndex+4:])
+				if isDigit(r) {
 					continue
 				}
 			}
 
+			// year is 4 ASCII digits, safe to index
 			if isDigit(rune(working[startIndex+2])) && isDigit(rune(working[startIndex+3])) {
 				year := working[startIndex : startIndex+4]
 				var parsing []Section

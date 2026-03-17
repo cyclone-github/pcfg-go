@@ -40,17 +40,17 @@ func LoadPasswordsToSlice(filename string, prefixCount bool) ([]string, int, int
 		n := 1
 
 		if prefixCount {
-			trimmed := bytes.TrimLeft(lineBuf, " ")
-			spaceIdx := bytes.IndexByte(trimmed, ' ')
-			if spaceIdx < 0 {
+			trimmed := bytes.TrimLeft(lineBuf, " \t")
+			sepIdx := bytes.IndexAny(trimmed, " \t")
+			if sepIdx < 0 {
 				continue
 			}
-			count, err := strconv.Atoi(string(trimmed[:spaceIdx]))
+			count, err := strconv.Atoi(string(trimmed[:sepIdx]))
 			if err != nil {
 				continue
 			}
 			n = count
-			cleanPassword = string(bytes.TrimSpace(trimmed[spaceIdx+1:]))
+			cleanPassword = string(bytes.TrimSpace(trimmed[sepIdx+1:]))
 		}
 
 		if len(cleanPassword) >= 7 && cleanPassword[:5] == "$HEX[" && cleanPassword[len(cleanPassword)-1] == ']' {
