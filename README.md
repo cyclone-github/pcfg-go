@@ -56,7 +56,7 @@ go install github.com/cyclone-github/pcfg-go/cmd/pcfg_guesser@main
 
 ### pcfg_guesser
 
-- **20-second benchmark**:
+- **benchmark**:
   - `Python3 pcfg_guesser ~280 K/s`
   - `Go pcfg_guesser ~11.4 M/s`
   - `Go pcfg_guesser ~40× faster (~3970% gain)`
