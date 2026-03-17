@@ -127,15 +127,17 @@ func loadTerminals(info *RulesetInfo, grammar pcfg.Grammar, baseDir string, conf
 		}
 	} else {
 		capConfig := config["CAPITALIZATION"]
-		var filenames []string
-		if err := json.Unmarshal([]byte(capConfig["filenames"]), &filenames); err == nil {
-			name := capConfig["name"]
-			for _, file := range filenames {
-				lenStr := strings.Split(file, ".")[0]
-				length, _ := strconv.Atoi(lenStr)
-				key := name + lenStr
-				allLower := strings.Repeat("L", length)
-				grammar[key] = []pcfg.GrammarEntry{{Values: []string{allLower}, Prob: 1.0}}
+		if capConfig != nil {
+			var filenames []string
+			if err := json.Unmarshal([]byte(capConfig["filenames"]), &filenames); err == nil {
+				name := capConfig["name"]
+				for _, file := range filenames {
+					lenStr := strings.Split(file, ".")[0]
+					length, _ := strconv.Atoi(lenStr)
+					key := name + lenStr
+					allLower := strings.Repeat("L", length)
+					grammar[key] = []pcfg.GrammarEntry{{Values: []string{allLower}, Prob: 1.0}}
+				}
 			}
 		}
 	}
@@ -334,8 +336,11 @@ func containsMarkov(replacements []string) bool {
 func addCaseMangling(base *pcfg.BaseStructure) {
 	var newReplacements []string
 	for _, r := range base.Replacements {
+		if len(r) == 0 {
+			continue
+		}
 		newReplacements = append(newReplacements, r)
-		if len(r) > 0 && r[0] == 'A' {
+		if r[0] == 'A' {
 			lenStr := r[1:]
 			newReplacements = append(newReplacements, "C"+lenStr)
 		}

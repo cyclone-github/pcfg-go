@@ -1,6 +1,9 @@
 package parser
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 var contextSensitiveReplacements = []string{
 	";p", ":p", "*0*", "#1",
@@ -22,8 +25,10 @@ func detectContextSensitive(section Section) ([]Section, string) {
 		}
 
 		if replacement == "#1" {
-			if startIndex < len(working)-3 {
-				if isDigit(rune(working[startIndex+3])) {
+			after := startIndex + len(replacement)
+			if after < len(working) {
+				r, _ := utf8.DecodeRuneInString(working[after:])
+				if isDigit(r) {
 					continue
 				}
 			}

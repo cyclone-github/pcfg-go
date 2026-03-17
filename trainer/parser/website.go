@@ -3,6 +3,7 @@ package parser
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 func isURLChar(r rune) bool {
@@ -33,10 +34,11 @@ func detectWebsite(section Section) ([]Section, string, string, string) {
 			totalIndex := searchIndex + idx
 
 			// ensure valid boundary after TLD
-			if totalIndex+len(tld) < len(working) {
-				nextChar := rune(working[totalIndex+len(tld)])
-				if unicode.IsLetter(nextChar) || unicode.IsDigit(nextChar) || nextChar == '-' {
-					searchIndex = totalIndex + len(tld)
+			afterTLD := totalIndex + len(tld)
+			if afterTLD < len(working) {
+				r, _ := utf8.DecodeRuneInString(working[afterTLD:])
+				if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' {
+					searchIndex = afterTLD
 					continue
 				}
 			}
@@ -45,8 +47,12 @@ func detectWebsite(section Section) ([]Section, string, string, string) {
 
 			// scan forward for full URL
 			endOfURL := endIndex
-			for endOfURL < len(working) && isURLChar(rune(working[endOfURL])) {
-				endOfURL++
+			for endOfURL < len(working) {
+				r, size := utf8.DecodeRuneInString(working[endOfURL:])
+				if size == 0 || !isURLChar(r) {
+					break
+				}
+				endOfURL += size
 			}
 
 			// determine start index

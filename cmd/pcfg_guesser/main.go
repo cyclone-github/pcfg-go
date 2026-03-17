@@ -4,7 +4,7 @@
    URL: https://github.com/cyclone-github/
    Repo: https://github.com/cyclone-github/pcfg-go/
    Credits: https://github.com/lakiw/pcfg_cracker/
-   Version: 0.5.0 (Go)
+   Version: 0.5.1 (Go)
 */
 
 package main
@@ -16,12 +16,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/cyclone-github/pcfg-go/guesser"
 	"github.com/cyclone-github/pcfg-go/guesser/omen"
 )
 
-const version = "0.5.0 (Go)"
+const version = "0.5.1 (Go)"
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -51,7 +52,7 @@ func main() {
 		os.Exit(0)
 	}
 	if *versionFlag {
-		fmt.Fprintln(os.Stderr, "PCFG Guesser v0.5.0 (Go)")
+		fmt.Fprintln(os.Stderr, "PCFG Guesser v0.5.1 (Go)")
 		fmt.Fprintln(os.Stderr, "https://github.com/cyclone-github/pcfg-go/")
 		os.Exit(0)
 	}
@@ -92,6 +93,23 @@ func main() {
 
 	exeDir := filepath.Dir(exe)
 	savePath := filepath.Join(exeDir, *session+".sav")
+	// Fallback to cwd if exe is in a temp dir (e.g. go run) or exe dir isn't writable
+	if cwd, err := os.Getwd(); err == nil {
+		useCwd := strings.HasPrefix(exeDir, "/tmp") || strings.Contains(exeDir, "go-build")
+		if !useCwd {
+			// test writability without truncating existing session file
+			testPath := savePath + ".writetest"
+			if f, err := os.Create(testPath); err != nil {
+				useCwd = true
+			} else {
+				f.Close()
+				os.Remove(testPath)
+			}
+		}
+		if useCwd {
+			savePath = filepath.Join(cwd, *session+".sav")
+		}
+	}
 
 	var gen *guesser.ParallelGuessGenerator
 	if *loadSession {
@@ -106,8 +124,9 @@ func main() {
 				os.Exit(1)
 			}
 			fmt.Fprintln(os.Stderr, "Restoring saved progress...")
+			fmt.Fprintln(os.Stderr, "Note: Restore may take a long time for sessions that ran for hours or days.")
 			queue := guesser.NewPcfgQueueFromSave(g, base, sav.MinProbability, sav.MaxProbability)
-			gen = guesser.NewParallelGuessGeneratorWithQueue(g, base, queue, omenGrammar, *debug)
+			gen = guesser.NewParallelGuessGeneratorWithQueueAndRestore(g, base, queue, omenGrammar, *debug, sav)
 		} else {
 			gen = guesser.NewParallelGuessGenerator(g, base, omenGrammar, *debug)
 		}
