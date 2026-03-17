@@ -39,7 +39,7 @@ go install github.com/cyclone-github/pcfg-go/cmd/pcfg_guesser@main
 - **Expanded TLD list** — Legacy, ccTLDs, gTLDs (`.info`, `.xyz`, `.app`, `.dev`, etc.), and short TLDs (`.co`, `.io`, `.ai`, `.me`, `.gg`); improves both website and email detection
 - **Improved website detection** — Broader URL/prefix detection (`http://`, `https://`, `www.`, etc.) and host extraction
 - **Multi-threaded architecture** — pcfg_guesser is multi-threaded for increased performance 
-- **Compiled binary** — No runtime, so fuss; pcfg-go uses staticly compiled binaries for speed and easy deployment
+- **Compiled binary** — No runtime, so fuss; pcfg-go uses statically compiled binaries for speed and easy deployment
 
 ---
 
