@@ -1,11 +1,13 @@
 [![Readme Card](https://github-readme-stats-fast.vercel.app/api/pin/?username=cyclone-github&repo=pcfg-go&theme=gruvbox)](https://github.com/cyclone-github/pcfg-go)
-
+<!--
 [![Go Report Card](https://goreportcard.com/badge/github.com/cyclone-github/pcfg-go)](https://goreportcard.com/report/github.com/cyclone-github/pcfg-go)
+!-->
 [![GitHub issues](https://img.shields.io/github/issues/cyclone-github/pcfg-go.svg)](https://github.com/cyclone-github/pcfg-go/issues)
 [![License](https://img.shields.io/github/license/cyclone-github/pcfg-go.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/release/cyclone-github/pcfg-go.svg)](https://github.com/cyclone-github/pcfg-go/releases)
+<!--
 [![Go Reference](https://pkg.go.dev/badge/github.com/cyclone-github/pcfg-go.svg)](https://pkg.go.dev/github.com/cyclone-github/pcfg-go)
-
+!-->
 # pcfg-go
 
 - Probabilistic Context-Free Grammar (PCFG) password generator - Pure Go Edition
