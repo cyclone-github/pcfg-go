@@ -47,7 +47,7 @@ type ParallelGuessGenerator struct {
 	startTime     time.Time
 
 	// from previous session when resuming with -l (accumulated stats)
-	prevRunningTime    int64
+	prevRunningTime      int64
 	originalFirstStarted string // RFC3339, preserved when resuming
 }
 
@@ -97,11 +97,13 @@ func NewParallelGuessGeneratorWithQueueAndRestore(grammar pcfg.Grammar, base []p
 
 // generates guesses using all CPU cores
 func (g *ParallelGuessGenerator) RunParallel(limit int64) (int64, error) {
-	return g.runParallelWithCtx(context.Background(), limit, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	return g.runParallelWithCtx(ctx, limit, cancel)
 }
 
-// runs with session save/load. On Ctrl+C, saves and exits gracefully.
-// Save runs on every exit path: normal completion, signal (SIGINT/SIGTERM), or panic.
+// runs with session save/load, on Ctrl+C, saves and exits gracefully
+// save runs on every exit path: normal completion, signal (SIGINT/SIGTERM), or panic
 func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, ruleName, ruleUUID string, skipBrute, skipCase bool) (int64, error) {
 	// Ignore SIGPIPE so piping to pv, head, etc. doesn't kill us before save on Ctrl+C
 	signal.Ignore(syscall.SIGPIPE)
@@ -116,7 +118,7 @@ func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, r
 		cancel()
 	}()
 
-	// Always save on exit: normal, signal, or panic. Works for first run and -l (load).
+	// always save on exit: normal, signal, or panic. Works for first run and -l (load)
 	defer func() {
 		currentRunTime := int64(time.Since(g.startTime).Seconds())
 		cfg := &SessionConfig{
@@ -137,7 +139,8 @@ func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, r
 	return g.runParallelWithCtx(ctx, limit, cancel)
 }
 
-func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit int64, cancelOnPipe func()) (int64, error) {
+// stops the popper and workers (SIGINT/SIGTERM, broken pipe, or -n limit reached)
+func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit int64, cancelRun func()) (int64, error) {
 	numWorkers := runtime.NumCPU()
 	if numWorkers < 1 {
 		numWorkers = 1
@@ -154,9 +157,9 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 		defer wg.Done()
 		defer writer.Flush()
 		for buf := range g.outputChan {
-			if _, err := writer.Write(buf); err != nil && cancelOnPipe != nil {
+			if _, err := writer.Write(buf); err != nil && cancelRun != nil {
 				// broken pipe, reader exited - cancel to trigger save
-				cancelOnPipe()
+				cancelRun()
 			}
 		}
 	}()
@@ -210,6 +213,10 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 				if limit > 0 {
 					v := remaining.Add(-1)
 					if v < 0 {
+						// stop popper/workers so batches flush; otherwise buffer only drains at queue end or SIGINT
+						if cancelRun != nil {
+							cancelRun()
+						}
 						return nil
 					}
 				}
