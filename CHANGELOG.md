@@ -1,3 +1,6 @@
+### v0.5.2; 2026-03-23
+- Fixed ([#5](https://github.com/cyclone-github/pcfg-go/issues/5)) -n {nth} not outputing
+
 ### v0.5.1; 2026-03-17
 ### Session Save/Restore
 - Save on SIGINT/SIGTERM
