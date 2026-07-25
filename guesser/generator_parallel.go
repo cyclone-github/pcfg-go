@@ -8,13 +8,12 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/cyclone-github/pcfg-go/guesser/omen"
 	pcfg "github.com/cyclone-github/pcfg-go/shared"
@@ -34,7 +33,6 @@ const (
 // Architecture: popper (1) -> workers (N) -> writer (1)
 // workers batch guesses into []byte to reduce channel traffic
 type ParallelGuessGenerator struct {
-	Grammar     pcfg.Grammar
 	Base        []pcfg.BaseStructure
 	Queue       *PcfgQueue
 	Debug       bool
@@ -54,7 +52,6 @@ type ParallelGuessGenerator struct {
 // creates a generator that uses parallel workers
 func NewParallelGuessGenerator(grammar pcfg.Grammar, base []pcfg.BaseStructure, omenGrammar *omen.Grammar, debug bool) *ParallelGuessGenerator {
 	return &ParallelGuessGenerator{
-		Grammar:     grammar,
 		Base:        base,
 		Queue:       NewPcfgQueue(grammar, base),
 		Debug:       debug,
@@ -67,7 +64,6 @@ func NewParallelGuessGenerator(grammar pcfg.Grammar, base []pcfg.BaseStructure, 
 // creates a generator with a pre-built queue (for session restore)
 func NewParallelGuessGeneratorWithQueue(grammar pcfg.Grammar, base []pcfg.BaseStructure, queue *PcfgQueue, omenGrammar *omen.Grammar, debug bool) *ParallelGuessGenerator {
 	return &ParallelGuessGenerator{
-		Grammar:     grammar,
 		Base:        base,
 		Queue:       queue,
 		Debug:       debug,
@@ -80,7 +76,6 @@ func NewParallelGuessGeneratorWithQueue(grammar pcfg.Grammar, base []pcfg.BaseSt
 // creates a generator with a pre-built queue and restores accumulated stats from a previous session
 func NewParallelGuessGeneratorWithQueueAndRestore(grammar pcfg.Grammar, base []pcfg.BaseStructure, queue *PcfgQueue, omenGrammar *omen.Grammar, debug bool, sav *SessionConfig) *ParallelGuessGenerator {
 	g := &ParallelGuessGenerator{
-		Grammar:              grammar,
 		Base:                 base,
 		Queue:                queue,
 		Debug:                debug,
@@ -146,6 +141,7 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 		numWorkers = 1
 	}
 
+	ig := g.Queue.IndexedGrammar()
 	writer := bufio.NewWriterSize(os.Stdout, writerBufSize)
 
 	var wg sync.WaitGroup
@@ -165,7 +161,7 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 	}()
 
 	// popper goroutine: pop PT items, send to workers
-	ptChan := make(chan *pcfg.PTItem, ptChanSize)
+	ptChan := make(chan *PTWork, ptChanSize)
 
 	wg.Add(1)
 	go func() {
@@ -183,7 +179,11 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 			}
 			g.numParseTrees.Add(1)
 			if g.Debug {
-				fmt.Fprintf(os.Stderr, "PT: %v Prob: %g\n", ptItem.PT, ptItem.Prob)
+				names := make([]string, len(ptItem.PT))
+				for i, n := range ptItem.PT {
+					names[i] = fmt.Sprintf("{%s %d}", ig.typeName(n.Type), n.Index)
+				}
+				fmt.Fprintf(os.Stderr, "PT: %v Prob: %g\n", names, ptItem.Prob)
 				continue
 			}
 			select {
@@ -206,7 +206,25 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 		go func() {
 			defer workerWg.Done()
 			batch := make([]byte, 0, batchSize*2)
-			output := func(guess string) error {
+			// reuse one OMEN TMTO cache for all Markov PTs on this worker
+			var omenOpt *omen.Optimizer
+			if g.OmenGrammar != nil {
+				omenOpt = omen.NewOptimizer(4)
+			}
+			// reusable prefix buffer for recursive guess building
+			guessBuf := make([]byte, 0, 64)
+
+			flushBatch := func() {
+				if len(batch) == 0 {
+					return
+				}
+				out := make([]byte, len(batch))
+				copy(out, batch)
+				g.outputChan <- out
+				batch = batch[:0]
+			}
+
+			output := func(guess []byte) error {
 				if ctx.Err() != nil {
 					return errStop
 				}
@@ -224,21 +242,16 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 				batch = append(batch, guess...)
 				batch = append(batch, '\n')
 				if len(batch) >= batchSize {
-					out := make([]byte, len(batch))
-					copy(out, batch)
-					g.outputChan <- out
-					batch = batch[:0]
+					flushBatch()
 				}
 				return nil
 			}
+
 			for ptItem := range ptChan {
-				g.createGuessesWithOutput("", ptItem.PT, 0, output)
+				guessBuf = guessBuf[:0]
+				g.recursiveGuesses(ig, guessBuf, ptItem.PT, output, omenOpt)
 			}
-			if len(batch) > 0 {
-				out := make([]byte, len(batch))
-				copy(out, batch)
-				g.outputChan <- out
-			}
+			flushBatch()
 		}()
 	}
 
@@ -251,114 +264,125 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 	return g.totalGuesses.Load(), nil
 }
 
-func (g *ParallelGuessGenerator) createGuessesWithOutput(curGuess string, pt []pcfg.PTNode, limit int64, output func(string) error) (int64, error) {
-	return g.recursiveGuessesWithOutput(curGuess, pt, limit, output)
-}
-
-func (g *ParallelGuessGenerator) recursiveGuessesWithOutput(curGuess string, pt []pcfg.PTNode, limit int64, output func(string) error) (int64, error) {
+func (g *ParallelGuessGenerator) recursiveGuesses(
+	ig *IndexedGrammar,
+	curGuess []byte,
+	pt []packedNode,
+	output func([]byte) error,
+	omenOpt *omen.Optimizer,
+) error {
 	if len(pt) == 0 {
-		return 0, nil
+		return nil
 	}
 
-	var numGuesses int64
-	category := pt[0].Type[0]
-	ptType := pt[0].Type
-	idx := pt[0].Index
-
-	entries := g.Grammar[ptType]
+	node := pt[0]
+	entries := ig.entries(node.Type)
+	idx := int(node.Index)
 	if idx >= len(entries) {
-		return 0, nil
+		return nil
 	}
 
-	switch category {
+	switch ig.category(node.Type) {
 	case 'M':
-		if g.OmenGrammar == nil {
-			return 0, nil
+		if g.OmenGrammar == nil || omenOpt == nil {
+			return nil
 		}
-		levelStr := entries[idx].Values[0]
-		level, err := strconv.Atoi(levelStr)
-		if err != nil {
-			return 0, nil
+		if !ig.hasMarkov || node.Type != ig.markovID || idx >= len(ig.markovLevel) {
+			return nil
 		}
-		return g.omenGuessesWithOutput(curGuess, pt[1:], level, limit, output)
+		level := ig.markovLevel[idx]
+		if level < 0 {
+			// invalid omen level string (old code skipped on strconv.Atoi error)
+			return nil
+		}
+		return g.omenGuesses(ig, curGuess, pt[1:], level, output, omenOpt)
 
 	case 'C':
 		values := entries[idx].Values
 		if len(values) == 0 {
-			return 0, nil
+			return nil
 		}
-		maskLen := len([]rune(values[0]))
-		guessRunes := []rune(curGuess)
+		maskLen := utf8.RuneCountInString(values[0])
+		guessRunes := []rune(string(curGuess))
 		if maskLen > len(guessRunes) {
-			return 0, nil
+			return nil
 		}
 		startWord := string(guessRunes[:len(guessRunes)-maskLen])
 		endWord := guessRunes[len(guessRunes)-maskLen:]
 
 		for _, mask := range values {
-			maskRunes := []rune(mask)
-			var newEnd strings.Builder
-			for i, m := range maskRunes {
-				if i >= len(endWord) {
+			// build mangled end into curGuess buffer: startWord + newEnd
+			curGuess = append(curGuess[:0], startWord...)
+			ri := 0
+			for _, m := range mask {
+				if ri >= len(endWord) {
 					break
 				}
 				if m == 'L' {
-					newEnd.WriteRune(endWord[i])
+					curGuess = utf8.AppendRune(curGuess, endWord[ri])
 				} else {
-					newEnd.WriteRune(unicode.ToUpper(endWord[i]))
+					curGuess = utf8.AppendRune(curGuess, unicode.ToUpper(endWord[ri]))
+				}
+				ri++
+			}
+
+			if len(pt) == 1 {
+				if err := output(curGuess); err != nil {
+					return err
+				}
+			} else {
+				if err := g.recursiveGuesses(ig, curGuess, pt[1:], output, omenOpt); err != nil {
+					return err
 				}
 			}
-			newGuess := startWord + newEnd.String()
-
-			if len(pt) == 1 {
-				output(newGuess)
-				numGuesses++
-			} else {
-				n, _ := g.recursiveGuessesWithOutput(newGuess, pt[1:], limit, output)
-				numGuesses += n
-			}
 		}
+		return nil
 
 	default:
+		baseLen := len(curGuess)
 		for _, value := range entries[idx].Values {
-			newGuess := curGuess + value
+			curGuess = append(curGuess[:baseLen], value...)
 			if len(pt) == 1 {
-				output(newGuess)
-				numGuesses++
+				if err := output(curGuess); err != nil {
+					return err
+				}
 			} else {
-				n, _ := g.recursiveGuessesWithOutput(newGuess, pt[1:], limit, output)
-				numGuesses += n
+				if err := g.recursiveGuesses(ig, curGuess, pt[1:], output, omenOpt); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
 	}
-
-	return numGuesses, nil
 }
 
-func (g *ParallelGuessGenerator) omenGuessesWithOutput(curGuess string, ptRest []pcfg.PTNode, level int, limit int64, output func(string) error) (int64, error) {
-	opt := omen.NewOptimizer(4)
-	cracker := omen.NewMarkovCracker(g.OmenGrammar, level, opt)
+func (g *ParallelGuessGenerator) omenGuesses(
+	ig *IndexedGrammar,
+	curGuess []byte,
+	ptRest []packedNode,
+	level int,
+	output func([]byte) error,
+	omenOpt *omen.Optimizer,
+) error {
+	cracker := omen.NewMarkovCracker(g.OmenGrammar, level, omenOpt)
+	baseLen := len(curGuess)
 
-	var numGuesses int64
 	for {
 		omenGuess := cracker.NextGuess()
 		if omenGuess == "" {
 			break
 		}
-		fullGuess := curGuess + omenGuess
+		curGuess = append(curGuess[:baseLen], omenGuess...)
 
 		if len(ptRest) == 0 {
-			if err := output(fullGuess); err != nil {
-				return numGuesses, err
+			if err := output(curGuess); err != nil {
+				return err
 			}
-			numGuesses++
 		} else {
-			n, err := g.recursiveGuessesWithOutput(fullGuess, ptRest, limit, output)
-			numGuesses += n
-			if err != nil {
-				return numGuesses, err
+			if err := g.recursiveGuesses(ig, curGuess, ptRest, output, omenOpt); err != nil {
+				return err
 			}
 		}
 	}
-	return numGuesses, nil
+	return nil
 }

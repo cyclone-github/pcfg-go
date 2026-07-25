@@ -57,12 +57,7 @@ func (gs *GuessStructure) NextGuess() string {
 		for {
 			cpChars := gs.cp[last.IP][depthLevel]
 			for last.Index < len(cpChars) {
-				elRunes := []rune(element.IP)
-				prefix := ""
-				if len(elRunes) > 1 {
-					prefix = string(elRunes[:len(elRunes)-1])
-				}
-				newIP := prefix + cpChars[last.Index]
+				newIP := element.IP[:len(element.IP)-1] + cpChars[last.Index]
 				newElements := gs.fillOutParseTree(newIP, reqLength, reqLevel-depthLevel)
 				if newElements != nil {
 					gs.parseTree = append(gs.parseTree, newElements...)
@@ -113,10 +108,9 @@ func (gs *GuessStructure) fillOutParseTree(ip string, length, targetLevel int) [
 		if cpIndex == nil {
 			return nil
 		}
-		ipRunes := []rune(ip)
 		prefix := ip
-		if len(ipRunes) > 1 {
-			prefix = string(ipRunes[:len(ipRunes)-1])
+		if len(ip) > 1 {
+			prefix = ip[:len(ip)-1]
 		}
 		return []ParseTreeNode{{IP: prefix, Level: cpLevel, Index: 0}}
 	}
@@ -140,18 +134,12 @@ func (gs *GuessStructure) fillOutParseTree(ip string, length, targetLevel int) [
 		}
 
 		nextLength := length - 1
-		ipRunes := []rune(ip)
 		prefix := ip
-		if len(ipRunes) > 1 {
-			prefix = string(ipRunes[:len(ipRunes)-1])
+		if len(ip) > 1 {
+			prefix = ip[:len(ip)-1]
 		}
 		for curIndex := 0; curIndex < len(cpIndex); curIndex++ {
-			nextIP := ""
-			if len(ipRunes) > 1 {
-				nextIP = string(ipRunes[1:]) + cpIndex[curIndex]
-			} else {
-				nextIP = cpIndex[curIndex]
-			}
+			nextIP := ip[1:] + cpIndex[curIndex]
 			workingParseTree := gs.fillOutParseTree(nextIP, nextLength, targetLevel-cpLevel)
 			if workingParseTree != nil {
 				result := append([]ParseTreeNode{{IP: prefix, Level: cpLevel, Index: curIndex}}, workingParseTree...)
@@ -172,10 +160,9 @@ func (gs *GuessStructure) fillOutParseTree(ip string, length, targetLevel int) [
 }
 
 func (gs *GuessStructure) findCP(ip string, topLevel, bottomLevel int) ([]string, int) {
-	ipRunes := []rune(ip)
 	prefix := ip
-	if len(ipRunes) > 1 {
-		prefix = string(ipRunes[:len(ipRunes)-1])
+	if len(ip) > 1 {
+		prefix = ip[:len(ip)-1]
 	}
 	if gs.maxLevel < topLevel {
 		topLevel = gs.maxLevel
