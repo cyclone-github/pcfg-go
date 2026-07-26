@@ -17,14 +17,14 @@
 
 ## Install
 
-**trainer:**
+**pcfg_trainer:**
 ```bash
-go install github.com/cyclone-github/pcfg-go/cmd/trainer@main
+go install -ldflags="-s -w" github.com/cyclone-github/pcfg-go/cmd/pcfg_trainer@main
 ```
 
 **pcfg_guesser:**
 ```bash
-go install github.com/cyclone-github/pcfg-go/cmd/pcfg_guesser@main
+go install -ldflags="-s -w" github.com/cyclone-github/pcfg-go/cmd/pcfg_guesser@main
 ```
 
 ---
@@ -62,12 +62,12 @@ go install github.com/cyclone-github/pcfg-go/cmd/pcfg_guesser@main
 
 ## Usage
 
-### trainer
+### pcfg_trainer
 
 Train a new ruleset from wordlist:
 
 ```bash
-trainer -r rule_name -t wordlist.txt
+pcfg_trainer -r rule_name -t wordlist.txt
 ```
 
 ### pcfg_guesser
@@ -97,7 +97,7 @@ pcfg_guesser -r rule_name -s my_session | hashcat -m 0 hashes.txt...
 
 ## Flags
 
-**trainer**
+**pcfg_trainer**
 
 pcfg-go vs pcfg-python3 flags
 
@@ -134,7 +134,7 @@ pcfg-go vs pcfg-python3 flags
 
 ---
 
-## Compile from source
+## Compile from source (linux)
 
 Requires Go and Git.
 
@@ -143,13 +143,13 @@ git clone https://github.com/cyclone-github/pcfg-go.git
 cd pcfg-go
 go mod tidy
 mkdir -p bin
-go build -ldflags="-s -w" -o bin/trainer ./cmd/trainer
+go build -ldflags="-s -w" -o bin/pcfg_trainer ./cmd/pcfg_trainer
 go build -ldflags="-s -w" -o bin/pcfg_guesser ./cmd/pcfg_guesser
 ```
 
 **Install to $GOPATH/bin:**
 ```bash
-go install -ldflags="-s -w" ./cmd/trainer
+go install -ldflags="-s -w" ./cmd/pcfg_trainer
 go install -ldflags="-s -w" ./cmd/pcfg_guesser
 ```
 

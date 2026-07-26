@@ -93,7 +93,7 @@ func printStatistics(pcfgParser *trainer.PCFGParser) {
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	cycloneFlag := flag.Bool("cyclone", false, "trainer")
+	cycloneFlag := flag.Bool("cyclone", false, "pcfg_trainer")
 	versionFlag := flag.Bool("version", false, "Display version")
 	helpFlag := flag.Bool("h", false, "Display help")
 
