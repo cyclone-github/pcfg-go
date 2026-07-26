@@ -1,6 +1,6 @@
 ### v0.5.3; 2026-07-25
 - `pcfg_guesser` ~2× faster than v0.5.2
-- ~70× faster than Python3 pcfg_guesser.py
+- ~2,578% faster than Python3 pcfg_guesser.py
 - Reduce long-run RAM growth in `pcfg_guesser` (priority-queue frontier)
   - Compact parse-tree representation (interned type IDs, packed nodes, arena reuse)
   - Contiguous index-based heap (fewer per-item allocations)
