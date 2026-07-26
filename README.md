@@ -1,6 +1,5 @@
 [![Readme Card](https://github-readme-stats-fast.vercel.app/api/pin/?username=cyclone-github&repo=pcfg-go&theme=gruvbox)](https://github.com/cyclone-github/pcfg-go)
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/cyclone-github/pcfg-go)](https://goreportcard.com/report/github.com/cyclone-github/pcfg-go)
 [![GitHub issues](https://img.shields.io/github/issues/cyclone-github/pcfg-go.svg)](https://github.com/cyclone-github/pcfg-go/issues)
 [![License](https://img.shields.io/github/license/cyclone-github/pcfg-go.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/release/cyclone-github/pcfg-go.svg)](https://github.com/cyclone-github/pcfg-go/releases)
@@ -18,28 +17,28 @@
 
 ## Install
 
-**trainer:**
+**pcfg_trainer:**
 ```bash
-go install github.com/cyclone-github/pcfg-go/cmd/trainer@main
+go install -ldflags="-s -w" github.com/cyclone-github/pcfg-go/cmd/pcfg_trainer@main
 ```
 
 **pcfg_guesser:**
 ```bash
-go install github.com/cyclone-github/pcfg-go/cmd/pcfg_guesser@main
+go install -ldflags="-s -w" github.com/cyclone-github/pcfg-go/cmd/pcfg_guesser@main
 ```
 
 ---
 
 ### Additions & improvements
 
-- **Performance** — ~3× faster trainer, ~40× faster pcfg_guesser (see Benchmarks)
+- **Performance** — ~3× faster trainer, ~70× faster pcfg_guesser vs Python3 (see Benchmarks)
 - **$HEX[] input** — Trainer accepts `$HEX[...]` encoded passwords in the training wordlist (multi-byte support)
 - **Ctrl+C handling** — Pressing Ctrl+C auto saves session on pcfg_guesser
 - **Multi-keyboard layouts** — QWERTY, AZERTY, QWERTZ, Dvorak, JCUKEN (Russian Cyrillic)
 - **Expanded TLD list** — Legacy, ccTLDs, gTLDs (`.info`, `.xyz`, `.app`, `.dev`, etc.), and short TLDs (`.co`, `.io`, `.ai`, `.me`, `.gg`); improves both website and email detection
 - **Improved website detection** — Broader URL/prefix detection (`http://`, `https://`, `www.`, etc.) and host extraction
 - **Multi-threaded architecture** — pcfg_guesser is multi-threaded for increased performance 
-- **Compiled binary** — No runtime, so fuss; pcfg-go uses statically compiled binaries for speed and easy deployment
+- **Compiled binary** — No runtime, no fuss; pcfg-go uses statically compiled binaries for speed and easy deployment
 
 ---
 
@@ -56,19 +55,19 @@ go install github.com/cyclone-github/pcfg-go/cmd/pcfg_guesser@main
 
 - **benchmark**:
   - `Python3 pcfg_guesser ~280 K/s`
-  - `Go pcfg_guesser ~11.4 M/s`
-  - `Go pcfg_guesser ~40× faster (~3970% gain)`
+  - `Go pcfg_guesser ~22 M/s`
+  - `Go pcfg_guesser ~70× faster than Python3`
 
 ---
 
 ## Usage
 
-### trainer
+### pcfg_trainer
 
 Train a new ruleset from wordlist:
 
 ```bash
-trainer -r rule_name -t wordlist.txt
+pcfg_trainer -r rule_name -t wordlist.txt
 ```
 
 ### pcfg_guesser
@@ -98,7 +97,7 @@ pcfg_guesser -r rule_name -s my_session | hashcat -m 0 hashes.txt...
 
 ## Flags
 
-**trainer**
+**pcfg_trainer**
 
 pcfg-go vs pcfg-python3 flags
 
@@ -135,7 +134,7 @@ pcfg-go vs pcfg-python3 flags
 
 ---
 
-## Compile from source
+## Compile from source (linux)
 
 Requires Go and Git.
 
@@ -144,13 +143,13 @@ git clone https://github.com/cyclone-github/pcfg-go.git
 cd pcfg-go
 go mod tidy
 mkdir -p bin
-go build -ldflags="-s -w" -o bin/trainer ./cmd/trainer
+go build -ldflags="-s -w" -o bin/pcfg_trainer ./cmd/pcfg_trainer
 go build -ldflags="-s -w" -o bin/pcfg_guesser ./cmd/pcfg_guesser
 ```
 
 **Install to $GOPATH/bin:**
 ```bash
-go install -ldflags="-s -w" ./cmd/trainer
+go install -ldflags="-s -w" ./cmd/pcfg_trainer
 go install -ldflags="-s -w" ./cmd/pcfg_guesser
 ```
 

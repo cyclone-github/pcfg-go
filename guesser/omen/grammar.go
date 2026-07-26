@@ -117,12 +117,11 @@ func loadNgrams(omenDir, filename string, g *Grammar, name string) error {
 		case "ep":
 			g.EP[ngram] = level
 		case "cp":
-			runes := []rune(ngram)
-			if len(runes) < 1 {
+			if len(ngram) < 1 {
 				continue
 			}
-			searchStr := string(runes[:len(runes)-1])
-			lastChar := string(runes[len(runes)-1])
+			searchStr := ngram[:len(ngram)-1]
+			lastChar := ngram[len(ngram)-1:]
 			if g.CP[searchStr] == nil {
 				g.CP[searchStr] = make(map[int][]string)
 			}

@@ -4,7 +4,7 @@
    URL: https://github.com/cyclone-github/
    Repo: https://github.com/cyclone-github/pcfg-go/
    Credits: https://github.com/lakiw/pcfg_cracker/
-   Version: 0.5.2 (Go)
+   Version: 0.5.3 (Go)
 */
 
 package main
@@ -93,13 +93,13 @@ func printStatistics(pcfgParser *trainer.PCFGParser) {
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	cycloneFlag := flag.Bool("cyclone", false, "trainer")
+	cycloneFlag := flag.Bool("cyclone", false, "pcfg_trainer")
 	versionFlag := flag.Bool("version", false, "Display version")
 	helpFlag := flag.Bool("h", false, "Display help")
 
 	info := &trainer.ProgramInfo{
 		Name:         "PCFG Trainer",
-		Version:      "0.5.2 (Go)",
+		Version:      "0.5.3 (Go)",
 		Author:       "cyclone",
 		Contact:      "https://github.com/cyclone-github/",
 		RuleName:     "Default",
@@ -135,7 +135,7 @@ func main() {
 		os.Exit(0)
 	}
 	if *versionFlag {
-		fmt.Fprintln(os.Stderr, "PCFG Trainer v0.5.2 (Go)")
+		fmt.Fprintln(os.Stderr, "PCFG Trainer v0.5.3 (Go)")
 		fmt.Fprintln(os.Stderr, "https://github.com/cyclone-github/pcfg-go/")
 		os.Exit(0)
 	}
