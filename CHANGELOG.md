@@ -1,3 +1,14 @@
+### v0.5.3; 2026-07-25
+- `pcfg_guesser` ~2× faster than v0.5.2
+- ~2,578% faster than Python3 pcfg_guesser.py
+- Reduce long-run RAM growth in `pcfg_guesser` (priority-queue frontier)
+  - Compact parse-tree representation (interned type IDs, packed nodes, arena reuse)
+  - Contiguous index-based heap (fewer per-item allocations)
+  - Reuse OMEN optimizer cache per worker
+  - Prefer `[]byte` guess building to cut string churn
+- Same generation logic; parallel stdout interleaving may differ across runs
+- Rename `trainer` to `pcfg_trainer`
+
 ### v0.5.2; 2026-03-23
 - Fixed ([#5](https://github.com/cyclone-github/pcfg-go/issues/5)) -n {nth} not outputing
 
