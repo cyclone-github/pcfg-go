@@ -1,3 +1,0 @@
-www.	0.5
-http://www.	0.25
-https://www.	0.25

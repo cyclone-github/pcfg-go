@@ -1,9 +1,0 @@
-aaaaaaaaaaaaaaaaaaaaaaaaa	0.1111111111111111
-bbbbbbbbbbbbbbbbbbbbbbbbb	0.1111111111111111
-fffffffffffffffffffffffff	0.1111111111111111
-hhhhhhhhhhhhhhhhhhhhhhhhh	0.1111111111111111
-kkkkkkkkkkkkkkkkkkkkkkkkk	0.1111111111111111
-nnnnnnnnnnnnnnnnnnnnnnnnn	0.1111111111111111
-qazwsxedcrfvtgbyhnujmikol	0.1111111111111111
-qqqqqqqqqqqqqqqqqqqqqqqqq	0.1111111111111111
-qwertyuiopasdfghjklzxcvbn	0.1111111111111111

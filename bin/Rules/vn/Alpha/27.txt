@@ -1,6 +1,0 @@
-aaaaaaaaaaaaaaaaaaaaaaaaaaa	0.16666666666666666
-fffffffffffffffffffffffffff	0.16666666666666666
-ggggggggggggggggggggggggggg	0.16666666666666666
-hhhhhhhhhhhhhhhhhhhhhhhhhhh	0.16666666666666666
-qqqqqqqqqqqqqqqqqqqqqqqqqqq	0.16666666666666666
-zzzzzzzzzzzzzzzzzzzzzzzzzzz	0.16666666666666666
