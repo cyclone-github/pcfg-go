@@ -1,0 +1,10 @@
+0987654321qwertyuiop	0.1
+0p9o8i7u6y5t4r3e2w1q	0.1
+1Q2W3E4R5T6Y7U8I9O0P	0.1
+1q2w3e4r5t6y7u8i9o0p	0.1
+poiuytrewq1234567890	0.1
+q1w2e3r4t5y6u7i8o9p0	0.1
+qawsedrftgyhujikolp;	0.1
+qwertyuiop0987654321	0.1
+zsxdcfvgbhnjmk,l.;/"	0.1
+zsxdcfvgbhnjmk,l.;/'	0.1

@@ -1,0 +1,4 @@
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	0.25
+ddddddddddddddddddddddddddddddd	0.25
+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq	0.25
+sssssssssssssssssssssssssssssss	0.25

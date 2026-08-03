@@ -21,6 +21,10 @@ type queueEntry struct {
 	PTLen    uint16
 }
 
+type ptChunk struct {
+	nodes []packedNode
+}
+
 // max-probability heap of indices into PcfgQueue.entries
 type indexHeap struct {
 	q *PcfgQueue
@@ -65,8 +69,8 @@ type PcfgQueue struct {
 	heap           indexHeap
 	entries        []queueEntry
 	freeEntries    []int32
-	ptArena        []packedNode
-	ptFree         [][]uint32 // length -> free offsets into ptArena
+	ptChunks       []ptChunk
+	ptFree         [][]uint32 // length -> free chunk indexes
 	ig             *IndexedGrammar
 	MaxProbability float64
 	MinProbability float64
@@ -90,7 +94,7 @@ func newPcfgQueueWithSave(grammar pcfg.Grammar, base []pcfg.BaseStructure, minPr
 		MaxProbability: maxProb,
 		MinProbability: minProb,
 		entries:        make([]queueEntry, 0, len(base)),
-		ptArena:        make([]packedNode, 0, len(base)*4),
+		ptChunks:       make([]ptChunk, 1, len(base)+1),
 		ptFree:         make([][]uint32, maxPTScratch+1),
 	}
 	q.heap.q = q
@@ -121,7 +125,14 @@ func (q *PcfgQueue) IndexedGrammar() *IndexedGrammar {
 }
 
 func (q *PcfgQueue) ptSlice(off uint32, length uint16) []packedNode {
-	return q.ptArena[off : off+uint32(length)]
+	if off == 0 || int(off) >= len(q.ptChunks) {
+		return nil
+	}
+	chunk := q.ptChunks[off]
+	if len(chunk.nodes) < int(length) {
+		return nil
+	}
+	return chunk.nodes[:length]
 }
 
 func (q *PcfgQueue) allocPT(n int) uint32 {
@@ -132,18 +143,25 @@ func (q *PcfgQueue) allocPT(n int) uint32 {
 		if freelist := q.ptFree[n]; len(freelist) > 0 {
 			off := freelist[len(freelist)-1]
 			q.ptFree[n] = freelist[:len(freelist)-1]
+			if int(off) >= len(q.ptChunks) {
+				q.ptChunks = append(q.ptChunks, ptChunk{})
+			}
+			if q.ptChunks[off].nodes == nil {
+				q.ptChunks[off].nodes = make([]packedNode, n)
+			}
 			return off
 		}
 	}
-	off := uint32(len(q.ptArena))
-	q.ptArena = append(q.ptArena, make([]packedNode, n)...)
+	off := uint32(len(q.ptChunks))
+	q.ptChunks = append(q.ptChunks, ptChunk{nodes: make([]packedNode, n)})
 	return off
 }
 
 func (q *PcfgQueue) freePT(off uint32, length uint16) {
-	if length == 0 {
+	if length == 0 || off == 0 || int(off) >= len(q.ptChunks) {
 		return
 	}
+	q.ptChunks[off].nodes = nil
 	n := int(length)
 	if n >= len(q.ptFree) {
 		// rare oversized PT: grow freelist table; still reclaim

@@ -1,0 +1,18 @@
+[rule_info]
+rule_name = test
+uuid = 9ca95f8fbcc103feedc48f2ea1258dbf
+skip_brute = false
+skip_case = false
+
+[session_info]
+first_started = 2026-07-20T14:50:52+07:00
+last_updated = 2026-07-20T14:50:52+07:00
+num_guesses = 8
+num_parse_trees = 11
+probability_coverage = 0
+running_time = 0
+
+[guessing_info]
+mode = priority_queue
+min_probability = 0
+max_probability = 0

@@ -24,9 +24,9 @@ var errStop = errors.New("stop")
 
 const (
 	ptChanSize     = 1024            // PT items buffered for workers
-	outputChanSize = 10000           // batches buffered for writer
-	batchSize      = 65536           // 64KB per batch
-	writerBufSize  = 8 * 1024 * 1024 // 8MB bufio
+	outputChanSize = 1024            // batches buffered for writer
+	batchSize      = 32768           // 32KB per batch
+	writerBufSize  = 1024 * 1024     // 1MB bufio
 )
 
 // ParallelGuessGenerator uses goroutines to parallelize guess generation
