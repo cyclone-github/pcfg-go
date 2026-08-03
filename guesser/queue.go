@@ -12,6 +12,9 @@ import (
 // max parse-tree depth observed in rulesets is ~168; leave headroom for scratch
 const maxPTScratch = 256
 
+// hard cap on pending parse-tree work so large grammars do not blow up RAM
+const defaultMaxQueueEntries = 250000
+
 // stored by value in a contiguous slice (no per-item heap object)
 type queueEntry struct {
 	Prob     float64
@@ -72,6 +75,7 @@ type PcfgQueue struct {
 	ptChunks       []ptChunk
 	ptFree         [][]uint32 // length -> free chunk indexes
 	ig             *IndexedGrammar
+	maxEntries     int
 	MaxProbability float64
 	MinProbability float64
 	seqCounter     atomic.Int64
@@ -79,15 +83,23 @@ type PcfgQueue struct {
 
 // create and initializes a priority queue with base structures
 func NewPcfgQueue(grammar pcfg.Grammar, base []pcfg.BaseStructure) *PcfgQueue {
-	return newPcfgQueueWithSave(grammar, base, 0, 1)
+	return NewPcfgQueueWithLimit(grammar, base, defaultMaxQueueEntries)
 }
 
 // creates queue restored from session (minProb, maxProb)
 func NewPcfgQueueFromSave(grammar pcfg.Grammar, base []pcfg.BaseStructure, minProb, maxProb float64) *PcfgQueue {
-	return newPcfgQueueWithSave(grammar, base, minProb, maxProb)
+	return NewPcfgQueueWithLimitAndSave(grammar, base, minProb, maxProb, defaultMaxQueueEntries)
 }
 
-func newPcfgQueueWithSave(grammar pcfg.Grammar, base []pcfg.BaseStructure, minProb, maxProb float64) *PcfgQueue {
+func NewPcfgQueueWithLimit(grammar pcfg.Grammar, base []pcfg.BaseStructure, maxEntries int) *PcfgQueue {
+	return newPcfgQueueWithSave(grammar, base, 0, 1, maxEntries)
+}
+
+func NewPcfgQueueWithLimitAndSave(grammar pcfg.Grammar, base []pcfg.BaseStructure, minProb, maxProb float64, maxEntries int) *PcfgQueue {
+	return newPcfgQueueWithSave(grammar, base, minProb, maxProb, maxEntries)
+}
+
+func newPcfgQueueWithSave(grammar pcfg.Grammar, base []pcfg.BaseStructure, minProb, maxProb float64, maxEntries int) *PcfgQueue {
 	ig := newIndexedGrammar(grammar, base)
 	q := &PcfgQueue{
 		ig:             ig,
@@ -96,6 +108,7 @@ func newPcfgQueueWithSave(grammar pcfg.Grammar, base []pcfg.BaseStructure, minPr
 		entries:        make([]queueEntry, 0, len(base)),
 		ptChunks:       make([]ptChunk, 1, len(base)+1),
 		ptFree:         make([][]uint32, maxPTScratch+1),
+		maxEntries:     maxEntries,
 	}
 	q.heap.q = q
 	q.heap.h = make([]int32, 0, len(base))
@@ -190,7 +203,14 @@ func (q *PcfgQueue) freeEntry(idx int32) {
 	q.freeEntries = append(q.freeEntries, idx)
 }
 
-func (q *PcfgQueue) pushEntry(prob, baseProb float64, ptOff uint32, ptLen uint16) {
+func (q *PcfgQueue) pushEntry(prob, baseProb float64, ptOff uint32, ptLen uint16) bool {
+	if q.maxEntries > 0 && q.heap.Len() >= q.maxEntries {
+		q.freePT(ptOff, ptLen)
+		return false
+	}
+	if q.heap.q == nil {
+		q.heap.q = q
+	}
 	idx := q.allocEntry()
 	seq := q.seqCounter.Add(1)
 	q.entries[idx] = queueEntry{
@@ -201,6 +221,7 @@ func (q *PcfgQueue) pushEntry(prob, baseProb float64, ptOff uint32, ptLen uint16
 		PTLen:    ptLen,
 	}
 	heap.Push(&q.heap, idx)
+	return true
 }
 
 // restore per base structure in parallel, then merge

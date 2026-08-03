@@ -37,6 +37,8 @@ go install -ldflags="-s -w" github.com/cyclone-github/pcfg-go/cmd/pcfg_guesser@m
 - **Expanded TLD list** — Legacy, ccTLDs, gTLDs (`.info`, `.xyz`, `.app`, `.dev`, etc.), and short TLDs (`.co`, `.io`, `.ai`, `.me`, `.gg`); improves both website and email detection
 - **Improved website detection** — Broader URL/prefix detection (`http://`, `https://`, `www.`, etc.) and host extraction
 - **Multi-threaded architecture** — pcfg_guesser is multi-threaded for increased performance 
+- **Memory controls** — configurable queue limit and output buffering to reduce runaway memory growth on very large runs
+- **Autosave sessions** — periodically save progress to disk so long runs can resume safely
 - **Compiled binary** — No fuss; pcfg-go uses compiled binaries for speed and easy deployment
 
 ---
@@ -80,6 +82,15 @@ pcfg_guesser -r rule_name -s my_session -l # load and resume
 
 Press Ctrl+C to save session and exit.
 
+Memory-safe long runs:
+
+```bash
+pcfg_guesser -r rule_name -queue-limit 100000 -autosave-interval 30
+```
+
+- `-queue-limit` limits the number of pending parse-tree entries kept in memory.
+- `-autosave-interval` saves the session every N seconds (default: 10). Use `0` to disable periodic autosave.
+
 ### Piping into hashcat
 
 ```bash
@@ -122,6 +133,8 @@ pcfg-go vs pcfg-python3 flags
 | -b | --skip_brute | Skip OMEN/Markov |
 | -a | --all_lower | No case mangling |
 | -d | --debug | Debug output |
+| -queue-limit | --queue_limit | Max pending parse-tree entries in memory (default: 250000) |
+| -autosave-interval | --autosave_interval | Auto-save session every N seconds (default: 10, 0 disables) |
 | -h | --help | Help |
 | -version | --version | Version info |
 

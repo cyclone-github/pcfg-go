@@ -47,17 +47,28 @@ type ParallelGuessGenerator struct {
 	// from previous session when resuming with -l (accumulated stats)
 	prevRunningTime      int64
 	originalFirstStarted string // RFC3339, preserved when resuming
+	autoSaveInterval     time.Duration
+	savePath             string
+	ruleName             string
+	ruleUUID             string
+	skipBrute            bool
+	skipCase             bool
 }
 
 // creates a generator that uses parallel workers
 func NewParallelGuessGenerator(grammar pcfg.Grammar, base []pcfg.BaseStructure, omenGrammar *omen.Grammar, debug bool) *ParallelGuessGenerator {
+	return NewParallelGuessGeneratorWithLimit(grammar, base, omenGrammar, debug, defaultMaxQueueEntries)
+}
+
+func NewParallelGuessGeneratorWithLimit(grammar pcfg.Grammar, base []pcfg.BaseStructure, omenGrammar *omen.Grammar, debug bool, maxEntries int) *ParallelGuessGenerator {
 	return &ParallelGuessGenerator{
-		Base:        base,
-		Queue:       NewPcfgQueue(grammar, base),
-		Debug:       debug,
-		OmenGrammar: omenGrammar,
-		outputChan:  make(chan []byte, outputChanSize),
-		startTime:   time.Now(),
+		Base:              base,
+		Queue:             NewPcfgQueueWithLimit(grammar, base, maxEntries),
+		Debug:             debug,
+		OmenGrammar:       omenGrammar,
+		outputChan:        make(chan []byte, outputChanSize),
+		startTime:         time.Now(),
+		autoSaveInterval: 10 * time.Second,
 	}
 }
 
@@ -74,6 +85,14 @@ func NewParallelGuessGeneratorWithQueue(grammar pcfg.Grammar, base []pcfg.BaseSt
 }
 
 // creates a generator with a pre-built queue and restores accumulated stats from a previous session
+func (g *ParallelGuessGenerator) AutoSaveInterval(interval time.Duration) {
+	if interval > 0 {
+		g.autoSaveInterval = interval
+	} else {
+		g.autoSaveInterval = 10 * time.Second
+	}
+}
+
 func NewParallelGuessGeneratorWithQueueAndRestore(grammar pcfg.Grammar, base []pcfg.BaseStructure, queue *PcfgQueue, omenGrammar *omen.Grammar, debug bool, sav *SessionConfig) *ParallelGuessGenerator {
 	g := &ParallelGuessGenerator{
 		Base:                 base,
@@ -84,6 +103,7 @@ func NewParallelGuessGeneratorWithQueueAndRestore(grammar pcfg.Grammar, base []p
 		startTime:            time.Now(),
 		prevRunningTime:      sav.RunningTime,
 		originalFirstStarted: sav.FirstStarted,
+		autoSaveInterval:     10 * time.Second,
 	}
 	g.totalGuesses.Store(sav.NumGuesses)
 	g.numParseTrees.Store(sav.NumParseTrees)
@@ -100,6 +120,11 @@ func (g *ParallelGuessGenerator) RunParallel(limit int64) (int64, error) {
 // runs with session save/load, on Ctrl+C, saves and exits gracefully
 // save runs on every exit path: normal completion, signal (SIGINT/SIGTERM), or panic
 func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, ruleName, ruleUUID string, skipBrute, skipCase bool) (int64, error) {
+	g.savePath = savePath
+	g.ruleName = ruleName
+	g.ruleUUID = ruleUUID
+	g.skipBrute = skipBrute
+	g.skipCase = skipCase
 	// Ignore SIGPIPE so piping to pv, head, etc. doesn't kill us before save on Ctrl+C
 	signal.Ignore(syscall.SIGPIPE)
 
@@ -115,16 +140,7 @@ func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, r
 
 	// always save on exit: normal, signal, or panic. Works for first run and -l (load)
 	defer func() {
-		currentRunTime := int64(time.Since(g.startTime).Seconds())
-		cfg := &SessionConfig{
-			NumGuesses:     g.totalGuesses.Load(),
-			NumParseTrees:  g.numParseTrees.Load(),
-			ProbCoverage:   0,
-			RunningTime:    g.prevRunningTime + currentRunTime,
-			MinProbability: g.Queue.MinProbability,
-			MaxProbability: g.Queue.MaxProbability,
-		}
-		if saveErr := SaveSession(savePath, cfg, ruleName, ruleUUID, skipBrute, skipCase, g.originalFirstStarted); saveErr != nil {
+		if saveErr := g.saveSession(savePath, ruleName, ruleUUID, skipBrute, skipCase); saveErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", saveErr)
 		} else {
 			fmt.Fprintf(os.Stderr, "Session saved to %s\n", savePath)
@@ -132,6 +148,19 @@ func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, r
 	}()
 
 	return g.runParallelWithCtx(ctx, limit, cancel)
+}
+
+func (g *ParallelGuessGenerator) saveSession(savePath, ruleName, ruleUUID string, skipBrute, skipCase bool) error {
+	currentRunTime := int64(time.Since(g.startTime).Seconds())
+	cfg := &SessionConfig{
+		NumGuesses:     g.totalGuesses.Load(),
+		NumParseTrees:  g.numParseTrees.Load(),
+		ProbCoverage:   0,
+		RunningTime:    g.prevRunningTime + currentRunTime,
+		MinProbability: g.Queue.MinProbability,
+		MaxProbability: g.Queue.MaxProbability,
+	}
+	return SaveSession(savePath, cfg, ruleName, ruleUUID, skipBrute, skipCase, g.originalFirstStarted)
 }
 
 // stops the popper and workers (SIGINT/SIGTERM, broken pipe, or -n limit reached)
@@ -197,6 +226,23 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 	// remaining: atomic counter for -n
 	var remaining atomic.Int64
 	remaining.Store(limit)
+
+	if g.autoSaveInterval > 0 {
+		go func() {
+			ticker := time.NewTicker(g.autoSaveInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := g.saveSession(g.savePath, g.ruleName, g.ruleUUID, g.skipBrute, g.skipCase); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: could not autosave session: %v\n", err)
+					}
+				}
+			}
+		}()
+	}
 
 	// worker goroutines
 	workerWg := sync.WaitGroup{}

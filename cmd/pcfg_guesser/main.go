@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/cyclone-github/pcfg-go/guesser"
 	"github.com/cyclone-github/pcfg-go/guesser/omen"
@@ -38,6 +39,8 @@ func main() {
 	skipBrute := flag.Bool("b", false, "Skip OMEN/Markov guesses")
 	allLower := flag.Bool("a", false, "No case mangling")
 	debug := flag.Bool("d", false, "Debug output instead of guesses")
+	queueLimit := flag.Int("queue-limit", 250000, "Max pending parse-tree entries in queue (default: 250000)")
+	autoSaveInterval := flag.Int("autosave-interval", 10, "Auto-save session every N seconds (default: 10)")
 
 	flag.Parse()
 
@@ -127,13 +130,16 @@ func main() {
 			}
 			fmt.Fprintln(os.Stderr, "Restoring saved progress...")
 			fmt.Fprintln(os.Stderr, "Note: Restore may take a long time for sessions that ran for hours or days.")
-			queue := guesser.NewPcfgQueueFromSave(g, base, sav.MinProbability, sav.MaxProbability)
+			queue := guesser.NewPcfgQueueWithLimitAndSave(g, base, sav.MinProbability, sav.MaxProbability, *queueLimit)
 			gen = guesser.NewParallelGuessGeneratorWithQueueAndRestore(g, base, queue, omenGrammar, *debug, sav)
 		} else {
-			gen = guesser.NewParallelGuessGenerator(g, base, omenGrammar, *debug)
+			gen = guesser.NewParallelGuessGeneratorWithLimit(g, base, omenGrammar, *debug, *queueLimit)
 		}
 	} else {
-		gen = guesser.NewParallelGuessGenerator(g, base, omenGrammar, *debug)
+		gen = guesser.NewParallelGuessGeneratorWithLimit(g, base, omenGrammar, *debug, *queueLimit)
+	}
+	if *autoSaveInterval > 0 {
+		gen.AutoSaveInterval(time.Duration(*autoSaveInterval) * time.Second)
 	}
 
 	totalGuesses, err := gen.RunParallelWithSession(*limit, savePath, info.RuleName, info.UUID, *skipBrute, *allLower)
