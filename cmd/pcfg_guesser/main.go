@@ -120,6 +120,8 @@ func main() {
 		}
 		if sav != nil {
 			if sav.UUID != "" && info.UUID != "" && sav.UUID != info.UUID {
+				fmt.Fprintf(os.Stderr, "%v\n", sav.UUID)
+				fmt.Fprintf(os.Stderr, "%v\n", info.UUID)
 				fmt.Fprintf(os.Stderr, "Error: Session ruleset UUID mismatch (ruleset was retrained)\n")
 				os.Exit(1)
 			}
