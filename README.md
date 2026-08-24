@@ -9,8 +9,9 @@
 
 - Probabilistic Context-Free Grammar (PCFG) password generator - Pure Go Edition
   - pcfg-go is a Pure Go rewrite of the Python3 [pcfg_cracker](https://github.com/lakiw/pcfg_cracker)
-  - The goal of this Go implementation is to provide a substantial performance improvement over the original Python3 version, while also adding features such as supporting `$HEX[]` input/output and multi-byte character support — which is not implemented in the [Pure C pcfg_guesser](https://github.com/lakiw/compiled-pcfg)
-  - Credits for the original python3 pcfg_cracker belong to the author, [lakiw](https://github.com/lakiw)
+  - The goal of this Go implementation is to provide a substantial performance improvement for both trainer and guesser over the original Python3 version, while also adding features such as supporting `$HEX[]` input/output and multi-byte character support — which is not implemented in the [Pure C pcfg_guesser](https://github.com/lakiw/compiled-pcfg)
+  - Credits for the original python3 pcfg_cracker belong to the author [@lakiw](https://github.com/lakiw)
+  - Rules trained by `pcfg_trainer` are compatible with hashcat's new PCFG `-a 4` attack mode. See the [hashcat PCFG implementation commit](https://github.com/hashcat/hashcat/commit/ce90358b2251726c99742e5761ae3dfd41dbd4b2) for details.
   
 ---
 
