@@ -87,6 +87,12 @@ Press Ctrl+C to save session and exit.
 pcfg_guesser -r rule_name -s my_session | hashcat -m 0 hashes.txt...
 ```
 
+### Using trained rules with hashcat -a 4 PCFG mode
+
+```bash
+hashcat -m 0 -a 4 hashes.txt path_to_pcfg_rule_dir ...
+```
+
 ---
 
 ## Flags
