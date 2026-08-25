@@ -31,13 +31,13 @@ go install -ldflags="-s -w" github.com/cyclone-github/pcfg-go/cmd/pcfg_guesser@m
 
 ### Additions & improvements
 
-- **Performance** — ~342% faster trainer, ~2,578% faster pcfg_guesser vs Python3 (see Benchmarks)
+- **Performance** — ~5.5× (~446%) faster trainer and 391× (~39,000%) faster pcfg_guesser vs Python3 (see Benchmarks)
 - **$HEX[] input** — Trainer accepts `$HEX[...]` encoded passwords in the training wordlist (multi-byte support)
 - **Ctrl+C handling** — Pressing Ctrl+C auto saves session on pcfg_guesser
 - **Multi-keyboard layouts** — QWERTY, AZERTY, QWERTZ, Dvorak, JCUKEN (Russian Cyrillic)
 - **Expanded TLD list** — Legacy, ccTLDs, gTLDs (`.info`, `.xyz`, `.app`, `.dev`, etc.), and short TLDs (`.co`, `.io`, `.ai`, `.me`, `.gg`); improves both website and email detection
 - **Improved website detection** — Broader URL/prefix detection (`http://`, `https://`, `www.`, etc.) and host extraction
-- **Multi-threaded architecture** — pcfg_guesser is multi-threaded for increased performance 
+- **Multi-threaded architecture** — pcfg_guesser is multi-threaded for increased performance
 - **Compiled binary** — No fuss; pcfg-go uses compiled binaries for speed and easy deployment
 
 ---
@@ -45,12 +45,14 @@ go install -ldflags="-s -w" github.com/cyclone-github/pcfg-go/cmd/pcfg_guesser@m
 ## Benchmarks on **1 million password training set**
 
 ### pcfg_trainer
-- `Python3 trainer: 97.2 seconds`
-- `Go pcfg_trainer: 22 seconds`
+- `Python3 trainer: 97.2s`
+- `Go pcfg_trainer: 17.8s`
+- **Speedup: ~5.5× faster**
 
 ### pcfg_guesser
-- `Python3 pcfg_guesser 195.5s`
-- `Go pcfg_guesser 7.3s`
+- `Python3 pcfg_guesser: 195.5s`
+- `Go pcfg_guesser: 494 ms`
+- **Speedup: ~391× faster**
 
 ---
 
