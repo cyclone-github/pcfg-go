@@ -9,7 +9,7 @@ func detectEmail(section Section) ([]Section, string, string) {
 	working := strings.ToLower(section.Value)
 
 	if !strings.Contains(working, ".") || !strings.Contains(working, "@") {
-		return []Section{section}, "", ""
+		return nil, "", ""
 	}
 
 	tldList := getTLDList()
@@ -43,7 +43,7 @@ func detectEmail(section Section) ([]Section, string, string) {
 
 		return parsing, found, provider
 	}
-	return []Section{section}, "", ""
+	return nil, "", ""
 }
 
 func EmailDetection(sectionList []Section) ([]Section, []string, []string) {

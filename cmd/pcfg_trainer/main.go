@@ -4,7 +4,7 @@
    URL: https://github.com/cyclone-github/
    Repo: https://github.com/cyclone-github/pcfg-go/
    Credits: https://github.com/lakiw/pcfg_cracker/
-   Version: 0.5.3 (Go)
+   Version: 0.6.0-dev (Go)
 */
 
 package main
@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"unicode/utf8"
 
 	pcfg "github.com/cyclone-github/pcfg-go/shared"
@@ -99,7 +100,7 @@ func main() {
 
 	info := &trainer.ProgramInfo{
 		Name:         "PCFG Trainer",
-		Version:      "0.5.3 (Go)",
+		Version:      "0.6.0-dev (Go)",
 		Author:       "cyclone",
 		Contact:      "https://github.com/cyclone-github/",
 		RuleName:     "Default",
@@ -135,7 +136,7 @@ func main() {
 		os.Exit(0)
 	}
 	if *versionFlag {
-		fmt.Fprintln(os.Stderr, "PCFG Trainer v0.5.3 (Go)")
+		fmt.Fprintln(os.Stderr, "PCFG Trainer v0.6.0-dev (Go)")
 		fmt.Fprintln(os.Stderr, "https://github.com/cyclone-github/pcfg-go/")
 		os.Exit(0)
 	}
@@ -222,7 +223,7 @@ func runTrainer(info *trainer.ProgramInfo, baseDir string) error {
 		fmt.Println()
 	}
 
-	// pass 1 (sequential: alphabet + multiword)
+	// pass 1 (parallel: alphabet + multiword)
 	fmt.Println("-------------------------------------------------")
 	fmt.Println("Performing the first pass (alphabet + multiword)")
 	fmt.Println("-------------------------------------------------")
@@ -248,13 +249,7 @@ func runTrainer(info *trainer.ProgramInfo, baseDir string) error {
 		}
 	}
 
-	for i, pw := range passwords {
-		if (i+1)%1000000 == 0 {
-			fmt.Printf("%d Million\n", (i+1)/1000000)
-		}
-		ag.ProcessPassword(pw)
-		mwd.Train(pw, false)
-	}
+	trainer.RunPass1Parallel(passwords, ag, mwd, 0)
 
 	alphabet := ag.GetAlphabet()
 
@@ -326,16 +321,31 @@ func runTrainer(info *trainer.ProgramInfo, baseDir string) error {
 		NumToCheckForDuplicates: 100000,
 	}
 
-	if err := trainer.SaveConfigFile(baseDir, info, fileInput, pcfgParser); err != nil {
-		return fmt.Errorf("saving config: %w", err)
-	}
+	var saveErrs [3]error
+	var saveWG sync.WaitGroup
+	saveWG.Add(len(saveErrs))
+	go func() {
+		defer saveWG.Done()
+		saveErrs[0] = trainer.SaveConfigFile(baseDir, info, fileInput, pcfgParser)
+	}()
+	go func() {
+		defer saveWG.Done()
+		saveErrs[1] = trainer.SaveOmenRules(baseDir, omenTrainer, omenKeyspace, omenLevels, numValid, info)
+	}()
+	go func() {
+		defer saveWG.Done()
+		saveErrs[2] = trainer.SavePCFGData(baseDir, pcfgParser, info.Encoding, info.SaveSensitive)
+	}()
+	saveWG.Wait()
 
-	if err := trainer.SaveOmenRules(baseDir, omenTrainer, omenKeyspace, omenLevels, numValid, info); err != nil {
-		return fmt.Errorf("saving OMEN rules: %w", err)
+	if saveErrs[0] != nil {
+		return fmt.Errorf("saving config: %w", saveErrs[0])
 	}
-
-	if err := trainer.SavePCFGData(baseDir, pcfgParser, info.Encoding, info.SaveSensitive); err != nil {
-		return fmt.Errorf("saving PCFG data: %w", err)
+	if saveErrs[1] != nil {
+		return fmt.Errorf("saving OMEN rules: %w", saveErrs[1])
+	}
+	if saveErrs[2] != nil {
+		return fmt.Errorf("saving PCFG data: %w", saveErrs[2])
 	}
 
 	fmt.Println()

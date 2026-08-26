@@ -17,10 +17,10 @@ type packedNode struct {
 
 // grammar entries by interned TypeID for O(1) lookup without per-node string headers
 type IndexedGrammar struct {
-	byID  [][]pcfg.GrammarEntry
-	name  []string
-	id    map[string]TypeID
-	cat   []byte // first byte of type name ('A','C','M',...)
+	byID [][]pcfg.GrammarEntry
+	name []string
+	id   map[string]TypeID
+	cat  []byte // first byte of type name ('A','C','M',...)
 
 	markovID    TypeID
 	hasMarkov   bool

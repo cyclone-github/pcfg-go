@@ -17,6 +17,9 @@ var contextSensitiveReplacements = []string{
 
 func detectContextSensitive(section Section) ([]Section, string) {
 	working := section.Value
+	if !strings.ContainsAny(working, ".;:*#<") {
+		return nil, ""
+	}
 
 	for _, replacement := range contextSensitiveReplacements {
 		startIndex := strings.Index(working, replacement)
@@ -44,22 +47,20 @@ func detectContextSensitive(section Section) ([]Section, string) {
 		}
 		return parsing, replacement
 	}
-	return []Section{section}, ""
+	return nil, ""
 }
 
-func ContextSensitiveDetection(sectionList []Section) ([]Section, []string) {
-	var csList []string
+func ContextSensitiveDetection(sectionList []Section) []Section {
 	index := 0
 	for index < len(sectionList) {
 		if sectionList[index].Type == "" {
 			parsing, csString := detectContextSensitive(sectionList[index])
 			if csString != "" {
-				csList = append(csList, csString)
 				sectionList = spliceReplace(sectionList, index, parsing)
 				continue
 			}
 		}
 		index++
 	}
-	return sectionList, csList
+	return sectionList
 }

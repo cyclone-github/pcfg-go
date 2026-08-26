@@ -2,12 +2,70 @@ package trainer
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/cyclone-github/pcfg-go/trainer/parser"
 )
 
+const cachedCapitalizationMaskLength = 128
+
+var (
+	lowerMasks [cachedCapitalizationMaskLength + 1]string
+	upperMasks [cachedCapitalizationMaskLength + 1]string
+	titleMasks [cachedCapitalizationMaskLength + 1]string
+)
+
+func init() {
+	for length := 1; length <= cachedCapitalizationMaskLength; length++ {
+		lowerMasks[length] = strings.Repeat("L", length)
+		upperMasks[length] = strings.Repeat("U", length)
+		titleMasks[length] = "U" + lowerMasks[length-1]
+	}
+}
+
+func capitalizationMask(value string, length int) string {
+	if length <= cachedCapitalizationMaskLength {
+		var mask [cachedCapitalizationMaskLength]byte
+		upperCount := 0
+		index := 0
+		for _, r := range value {
+			if unicode.IsUpper(r) {
+				mask[index] = 'U'
+				upperCount++
+			} else {
+				mask[index] = 'L'
+			}
+			index++
+		}
+		switch {
+		case upperCount == 0:
+			return lowerMasks[length]
+		case upperCount == length:
+			return upperMasks[length]
+		case upperCount == 1 && mask[0] == 'U':
+			return titleMasks[length]
+		default:
+			return string(mask[:length])
+		}
+	}
+
+	var mask strings.Builder
+	mask.Grow(length)
+	for _, r := range value {
+		if unicode.IsUpper(r) {
+			mask.WriteByte('U')
+		} else {
+			mask.WriteByte('L')
+		}
+	}
+	return mask.String()
+}
+
 type PCFGParser struct {
-	MultiwordDetector *parser.TrieMultiWordDetector
+	MultiwordDetector  *parser.TrieMultiWordDetector
+	sectionScratch     []parser.Section
+	replacementScratch []parser.Section
 
 	CountKeyboard       *LenIndexedCounters
 	CountEmails         *Counter
@@ -48,11 +106,7 @@ func NewPCFGParser(mwd *parser.TrieMultiWordDetector) *PCFGParser {
 }
 
 func (p *PCFGParser) Parse(password string) {
-
-	sectionList, foundWalks, _ := parser.DetectKeyboardWalk(password)
-	for _, walk := range foundWalks {
-		p.CountKeyboard.Inc(len([]rune(walk)), walk)
-	}
+	sectionList := parser.DetectKeyboardWalk(password, p.sectionScratch)
 
 	sectionList, emails, providers := parser.EmailDetection(sectionList)
 	for _, e := range emails {
@@ -75,38 +129,39 @@ func (p *PCFGParser) Parse(password string) {
 		}
 	}
 
-	sectionList, years := parser.YearDetection(sectionList)
-	for _, y := range years {
-		p.CountYears.Inc(y)
-	}
-
-	sectionList, csStrings := parser.ContextSensitiveDetection(sectionList)
-	for _, cs := range csStrings {
-		p.CountContext.Inc(cs)
-	}
-
-	sectionList, alphas, masks := parser.AlphaDetection(sectionList, p.MultiwordDetector)
-	for _, a := range alphas {
-		lowerA := strings.ToLower(a)
-		p.CountAlpha.Inc(len([]rune(lowerA)), lowerA)
-	}
-	for _, m := range masks {
-		p.CountAlphaMasks.Inc(len([]rune(m)), m)
-	}
-
-	sectionList, digits := parser.DigitDetection(sectionList)
-	for _, d := range digits {
-		p.CountDigits.Inc(len([]rune(d)), d)
-	}
-
-	sectionList, others := parser.OtherDetection(sectionList)
-	for _, o := range others {
-		p.CountOther.Inc(len([]rune(o)), o)
-	}
+	sectionList = parser.YearDetection(sectionList)
+	sectionList = parser.ContextSensitiveDetection(sectionList)
+	sectionList, p.replacementScratch = parser.AlphaDetection(
+		sectionList,
+		p.MultiwordDetector,
+		p.replacementScratch,
+	)
+	sectionList, p.replacementScratch = parser.DigitDetection(sectionList, p.replacementScratch)
+	sectionList = parser.OtherDetection(sectionList)
 
 	for _, section := range sectionList {
-		if section.Type != "" {
-			p.CountPrince.Inc(section.Type)
+		sectionType := section.Type
+		if sectionType == "" {
+			continue
+		}
+
+		p.CountPrince.Inc(sectionType)
+		switch sectionType[0] {
+		case 'K':
+			p.CountKeyboard.Inc(utf8.RuneCountInString(section.Value), section.Value)
+		case 'Y':
+			p.CountYears.Inc(section.Value)
+		case 'X':
+			p.CountContext.Inc(section.Value)
+		case 'A':
+			lower := strings.ToLower(section.Value)
+			length := utf8.RuneCountInString(lower)
+			p.CountAlpha.Inc(length, lower)
+			p.CountAlphaMasks.Inc(length, capitalizationMask(section.Value, length))
+		case 'D':
+			p.CountDigits.Inc(utf8.RuneCountInString(section.Value), section.Value)
+		case 'O':
+			p.CountOther.Inc(utf8.RuneCountInString(section.Value), section.Value)
 		}
 	}
 
@@ -115,6 +170,7 @@ func (p *PCFGParser) Parse(password string) {
 		p.CountBaseStructs.Inc(baseStruct)
 	}
 	p.CountRawBaseStructs.Inc(baseStruct)
+	p.sectionScratch = sectionList
 }
 
 func (p *PCFGParser) MergeFrom(other *PCFGParser) {

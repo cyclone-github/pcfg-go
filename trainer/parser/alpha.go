@@ -3,9 +3,64 @@ package parser
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
-func detectAlpha(section Section, mwd *TrieMultiWordDetector) ([]Section, []string, []string) {
+func detectAlpha(section Section, mwd *TrieMultiWordDetector, replacement []Section) ([]Section, bool) {
+	if isASCIIString(section.Value) {
+		return detectAlphaASCII(section, mwd, replacement)
+	}
+	return detectAlphaUnicode(section, mwd, replacement)
+}
+
+func detectAlphaASCII(section Section, mwd *TrieMultiWordDetector, replacement []Section) ([]Section, bool) {
+	value := section.Value
+	start := -1
+
+	for pos := 0; pos < len(value); pos++ {
+		if isASCIIAlpha(value[pos]) {
+			if start < 0 {
+				start = pos
+			}
+			continue
+		}
+		if start >= 0 {
+			return buildASCIIAlphaSections(section, start, pos, mwd, replacement), true
+		}
+	}
+
+	if start >= 0 {
+		return buildASCIIAlphaSections(section, start, len(value), mwd, replacement), true
+	}
+	return nil, false
+}
+
+func buildASCIIAlphaSections(section Section, start, end int, mwd *TrieMultiWordDetector, parsing []Section) []Section {
+	alpha := strings.ToLower(section.Value[start:end])
+	_, words := mwd.parseLowerASCII(alpha)
+	parsing = parsing[:0]
+
+	if start != 0 {
+		parsing = append(parsing, Section{Value: section.Value[:start]})
+	}
+
+	current := start
+	for _, word := range words {
+		wordLen := len(word)
+		parsing = append(parsing, Section{
+			Value: section.Value[current : current+wordLen],
+			Type:  lengthType('A', wordLen),
+		})
+		current += wordLen
+	}
+
+	if end != len(section.Value) {
+		parsing = append(parsing, Section{Value: section.Value[end:]})
+	}
+	return parsing
+}
+
+func detectAlphaUnicode(section Section, mwd *TrieMultiWordDetector, replacement []Section) ([]Section, bool) {
 	origRunes := []rune(section.Value)
 	workRunes := []rune(strings.ToLower(section.Value))
 
@@ -32,8 +87,7 @@ func detectAlpha(section Section, mwd *TrieMultiWordDetector) ([]Section, []stri
 				alphaStr := string(workRunes[startPos : endPos+1])
 				_, wordList := mwd.Parse(alphaStr)
 
-				var maskList []string
-				var parsing []Section
+				parsing := replacement[:0]
 
 				if startPos != 0 {
 					parsing = append(parsing, Section{Value: string(origRunes[0:startPos])})
@@ -41,21 +95,11 @@ func detectAlpha(section Section, mwd *TrieMultiWordDetector) ([]Section, []stri
 
 				currentStart := startPos
 				for _, word := range wordList {
-					wordRuneLen := len([]rune(word))
+					wordRuneLen := utf8.RuneCountInString(word)
 					parsing = append(parsing, Section{
 						Value: string(origRunes[currentStart : currentStart+wordRuneLen]),
-						Type:  "A" + itoa(wordRuneLen),
+						Type:  lengthType('A', wordRuneLen),
 					})
-
-					var mask strings.Builder
-					for _, lr := range origRunes[currentStart : currentStart+wordRuneLen] {
-						if unicode.IsUpper(lr) {
-							mask.WriteByte('U')
-						} else {
-							mask.WriteByte('L')
-						}
-					}
-					maskList = append(maskList, mask.String())
 					currentStart += wordRuneLen
 				}
 
@@ -63,28 +107,24 @@ func detectAlpha(section Section, mwd *TrieMultiWordDetector) ([]Section, []stri
 					parsing = append(parsing, Section{Value: string(origRunes[endPos+1:])})
 				}
 
-				return parsing, wordList, maskList
+				return parsing, true
 			}
 		}
 	}
-	return []Section{section}, nil, nil
+	return nil, false
 }
 
-func AlphaDetection(sectionList []Section, mwd *TrieMultiWordDetector) ([]Section, []string, []string) {
-	var alphaList []string
-	var maskList []string
-
+func AlphaDetection(sectionList []Section, mwd *TrieMultiWordDetector, replacement []Section) ([]Section, []Section) {
 	index := 0
 	for index < len(sectionList) {
 		if sectionList[index].Type == "" {
-			parsing, alphas, masks := detectAlpha(sectionList[index], mwd)
-			if alphas != nil {
-				alphaList = append(alphaList, alphas...)
-				maskList = append(maskList, masks...)
+			parsing, found := detectAlpha(sectionList[index], mwd, replacement)
+			if found {
 				sectionList = spliceReplace(sectionList, index, parsing)
+				replacement = parsing
 			}
 		}
 		index++
 	}
-	return sectionList, alphaList, maskList
+	return sectionList, replacement
 }

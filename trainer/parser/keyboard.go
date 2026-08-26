@@ -19,6 +19,21 @@ type keyPos struct {
 	Pos int
 }
 
+// numKeyboards is the number of supported keyboard layouts. Each layout is
+// assigned a stable bit position (see keyboardNames / the init order below) so
+// per-character position data and "active run" sets can be tracked with fixed
+// arrays and uint8 bitmasks instead of per-character map allocations.
+const numKeyboards = 5
+
+var keyboardNames = [numKeyboards]string{"qwerty", "jcuken", "qwertz", "azerty", "dvorak"}
+
+// charInfo holds, for a single rune, which keyboards contain it (present) and
+// the (row, pos) of its first occurrence on each of those keyboards.
+type charInfo struct {
+	present uint8
+	pos     [numKeyboards]keyPos
+}
+
 func getUSKeyboard() keyboardLayout {
 	return keyboardLayout{
 		Name:  "qwerty",
@@ -89,7 +104,10 @@ func getDVORAKKeyboard() keyboardLayout {
 	}
 }
 
-var charPosLookup map[rune]map[string]keyPos
+var (
+	charPosLookup          map[rune]*charInfo
+	asciiKeyboardAdjacency [128][128]uint8
+)
 
 func init() {
 	kbs := []keyboardLayout{
@@ -100,9 +118,11 @@ func init() {
 		getDVORAKKeyboard(),
 	}
 
-	charPosLookup = make(map[rune]map[string]keyPos)
+	charPosLookup = make(map[rune]*charInfo)
 
-	for _, kb := range kbs {
+	for id, kb := range kbs {
+		_ = keyboardNames[id]
+		bit := uint8(1) << uint(id)
 		rows := []struct {
 			row   int
 			chars []rune
@@ -115,24 +135,32 @@ func init() {
 
 		for _, r := range rows {
 			for i, c := range r.chars {
-				if _, exists := charPosLookup[c]; !exists {
-					charPosLookup[c] = make(map[string]keyPos)
+				ci := charPosLookup[c]
+				if ci == nil {
+					ci = &charInfo{}
+					charPosLookup[c] = ci
 				}
-				if _, exists := charPosLookup[c][kb.Name]; !exists {
-					charPosLookup[c][kb.Name] = keyPos{Row: r.row, Pos: i}
+				// first occurrence of this rune on this keyboard wins
+				if ci.present&bit == 0 {
+					ci.present |= bit
+					ci.pos[id] = keyPos{Row: r.row, Pos: i}
 				}
 			}
 		}
 	}
+
+	for past := 0; past < len(asciiKeyboardAdjacency); past++ {
+		for current := 0; current < len(asciiKeyboardAdjacency[past]); current++ {
+			asciiKeyboardAdjacency[past][current] = isNextOnKeyboard(
+				charPosLookup[rune(past)],
+				charPosLookup[rune(current)],
+			)
+		}
+	}
 }
 
-func findKeyboardRowColumn(ch rune) map[string]keyPos {
+func findKeyboardRowColumn(ch rune) *charInfo {
 	return charPosLookup[ch]
-}
-
-type runInfo struct {
-	PastRow, PastPos int
-	CurRow, CurPos   int
 }
 
 func abs(x int) int {
@@ -142,28 +170,34 @@ func abs(x int) int {
 	return x
 }
 
-func isNextOnKeyboard(past, current map[string]keyPos) map[string]runInfo {
-	runs := make(map[string]runInfo)
-
+// isNextOnKeyboard returns the set (bitmask) of keyboards on which the current
+// rune is adjacent to (within one row and one column of) the previous rune,
+// mirroring the original map-based logic but without allocations.
+func isNextOnKeyboard(past, current *charInfo) uint8 {
 	if past == nil || current == nil {
-		return runs
+		return 0
 	}
 
-	for pastName, pastData := range past {
-		curData, ok := current[pastName]
-		if !ok {
-			continue
-		}
-
-		if curData.Row == pastData.Row && curData.Pos == pastData.Pos {
-			continue
-		}
-
-		if abs(curData.Row-pastData.Row) <= 1 && abs(curData.Pos-pastData.Pos) <= 1 {
-			runs[pastName] = runInfo{pastData.Row, pastData.Pos, curData.Row, curData.Pos}
-		}
+	both := past.present & current.present
+	if both == 0 {
+		return 0
 	}
 
+	var runs uint8
+	for id := 0; id < numKeyboards; id++ {
+		bit := uint8(1) << uint(id)
+		if both&bit == 0 {
+			continue
+		}
+		pd := past.pos[id]
+		cd := current.pos[id]
+		if cd.Row == pd.Row && cd.Pos == pd.Pos {
+			continue
+		}
+		if abs(cd.Row-pd.Row) <= 1 && abs(cd.Pos-pd.Pos) <= 1 {
+			runs |= bit
+		}
+	}
 	return runs
 }
 
@@ -222,55 +256,151 @@ func interestingKeyboard(combo []rune) bool {
 	return (alpha + digit + special) >= 2
 }
 
-func DetectKeyboardWalk(password string) ([]Section, []string, []string) {
-	return detectKeyboardWalkImpl([]rune(password), 4)
+func DetectKeyboardWalk(password string, sections []Section) []Section {
+	sections = sections[:0]
+	if isASCIIString(password) {
+		return detectKeyboardWalkASCII(password, 4, sections)
+	}
+	return detectKeyboardWalkImpl([]rune(password), 4, sections)
 }
 
-func detectKeyboardWalkImpl(runes []rune, minRun int) ([]Section, []string, []string) {
-	pastPosList := map[string]keyPos{}
-	curCombo := []rune{}
-	keyboardRunList := map[string]runInfo{}
-	foundList := []string{}
-	sectionList := []Section{}
-	detectedKeyboards := []string{}
+func detectKeyboardWalkASCII(password string, minRun int, sectionList []Section) []Section {
+	var keyboardRunList uint8
+	comboStart := 0
+	past := -1
+
+	for index := 0; index < len(password); index++ {
+		current := int(password[index])
+		var currentRuns uint8
+		if past >= 0 {
+			currentRuns = asciiKeyboardAdjacency[past][current]
+		}
+		past = current
+
+		if keyboardRunList == 0 {
+			keyboardRunList = currentRuns
+		} else {
+			keyboardRunList &= currentRuns
+		}
+		if keyboardRunList != 0 {
+			continue
+		}
+
+		if index-comboStart >= minRun {
+			combo := password[comboStart:index]
+			if interestingKeyboardASCII(combo) {
+				if comboStart != 0 {
+					sectionList = append(sectionList, Section{Value: password[:comboStart]})
+				}
+				sectionList = append(sectionList, Section{
+					Value: combo,
+					Type:  keyboardType(len(combo)),
+				})
+				return detectKeyboardWalkASCII(password[index:], minRun, sectionList)
+			}
+		}
+		comboStart = index
+	}
+
+	combo := password[comboStart:]
+	if len(combo) >= minRun && interestingKeyboardASCII(combo) {
+		if comboStart != 0 {
+			sectionList = append(sectionList, Section{Value: password[:comboStart]})
+		}
+		sectionList = append(sectionList, Section{
+			Value: combo,
+			Type:  keyboardType(len(combo)),
+		})
+	} else {
+		sectionList = append(sectionList, Section{Value: password})
+	}
+	return sectionList
+}
+
+func interestingKeyboardASCII(combo string) bool {
+	if len(combo) < 4 {
+		return false
+	}
+	if combo[0] == 'e' {
+		return false
+	}
+	if combo[1] == 'e' && combo[2] == 'r' {
+		return false
+	}
+	if combo[0] == 't' && combo[1] == 'y' {
+		return false
+	}
+	if len(combo) >= 3 && combo[0] == 't' && combo[1] == 't' && combo[2] == 'y' {
+		return false
+	}
+	if combo[0] == 'y' {
+		return false
+	}
+	if combo[0] == '1' && combo[1] == '2' && combo[2] == '3' {
+		return false
+	}
+
+	n := len(combo)
+	if combo[n-1] == '3' && combo[n-2] == '2' && combo[n-3] == '1' &&
+		combo[n-4] != 'q' && combo[n-4] != 'Q' {
+		return false
+	}
+
+	fullLower := strings.ToLower(combo)
+	for _, fp := range falsePositiveWords {
+		if strings.Contains(fullLower, fp) {
+			return false
+		}
+	}
+
+	alpha, digit, special := false, false, false
+	for i := 0; i < len(combo); i++ {
+		switch {
+		case isASCIIAlpha(combo[i]):
+			alpha = true
+		case isASCIIDigit(combo[i]):
+			digit = true
+		default:
+			special = true
+		}
+	}
+	return boolCount(alpha, digit, special) >= 2
+}
+
+func boolCount(values ...bool) int {
+	count := 0
+	for _, value := range values {
+		if value {
+			count++
+		}
+	}
+	return count
+}
+
+func detectKeyboardWalkImpl(runes []rune, minRun int, sectionList []Section) []Section {
+	var pastPos *charInfo
+	var curCombo []rune
+	var keyboardRunList uint8
 
 	for index, ch := range runes {
 		posList := findKeyboardRowColumn(ch)
 
-		if index == 0 {
-			for board := range posList {
-				detectedKeyboards = append(detectedKeyboards, board)
-			}
+		currentRuns := isNextOnKeyboard(pastPos, posList)
+		pastPos = posList
+
+		// mask == 0 mirrors the original "len(keyboardRunList) == 0" reset path
+		if keyboardRunList == 0 {
+			keyboardRunList = currentRuns
 		} else {
-			filtered := detectedKeyboards[:0]
-			for _, k := range detectedKeyboards {
-				if _, ok := posList[k]; ok {
-					filtered = append(filtered, k)
-				}
-			}
-			detectedKeyboards = filtered
+			keyboardRunList &= currentRuns
 		}
 
-		currentRuns := isNextOnKeyboard(pastPosList, posList)
-		pastPosList = copyPosMap(posList)
-
-		if len(keyboardRunList) == 0 {
-			keyboardRunList = copyRunMap(currentRuns)
-		} else {
-			for key := range keyboardRunList {
-				if _, ok := currentRuns[key]; !ok {
-					delete(keyboardRunList, key)
-				}
-			}
-		}
-
-		if len(keyboardRunList) > 0 {
+		if keyboardRunList != 0 {
 			curCombo = append(curCombo, ch)
 		} else {
 			if len(curCombo) >= minRun {
 				if interestingKeyboard(curCombo) {
 					comboStr := string(curCombo)
-					foundList = append(foundList, comboStr)
 
 					if len(curCombo) != index {
 						sectionList = append(sectionList, Section{
@@ -284,22 +414,7 @@ func detectKeyboardWalkImpl(runes []rune, minRun int) ([]Section, []string, []st
 					})
 
 					if index != len(runes) {
-						tempSections, tempFound, tempDetected := detectKeyboardWalkImpl(runes[index:], minRun)
-						sectionList = append(sectionList, tempSections...)
-						foundList = append(foundList, tempFound...)
-
-						newDetected := []string{}
-						for _, k := range tempDetected {
-							for _, d := range detectedKeyboards {
-								if k == d {
-									newDetected = append(newDetected, k)
-									break
-								}
-							}
-						}
-						detectedKeyboards = newDetected
-
-						return sectionList, foundList, detectedKeyboards
+						return detectKeyboardWalkImpl(runes[index:], minRun, sectionList)
 					}
 				}
 			}
@@ -310,7 +425,6 @@ func detectKeyboardWalkImpl(runes []rune, minRun int) ([]Section, []string, []st
 	if len(curCombo) >= minRun {
 		if interestingKeyboard(curCombo) {
 			comboStr := string(curCombo)
-			foundList = append(foundList, comboStr)
 
 			if len(curCombo) != len(runes) {
 				sectionList = append(sectionList, Section{
@@ -329,25 +443,9 @@ func detectKeyboardWalkImpl(runes []rune, minRun int) ([]Section, []string, []st
 		sectionList = append(sectionList, Section{Value: string(runes)})
 	}
 
-	return sectionList, foundList, detectedKeyboards
+	return sectionList
 }
 
 func keyboardType(length int) string {
-	return "K" + itoa(length)
-}
-
-func copyPosMap(m map[string]keyPos) map[string]keyPos {
-	r := make(map[string]keyPos, len(m))
-	for k, v := range m {
-		r[k] = v
-	}
-	return r
-}
-
-func copyRunMap(m map[string]runInfo) map[string]runInfo {
-	r := make(map[string]runInfo, len(m))
-	for k, v := range m {
-		r[k] = v
-	}
-	return r
+	return lengthType('K', length)
 }

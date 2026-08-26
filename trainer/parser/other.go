@@ -1,12 +1,10 @@
 package parser
 
-func OtherDetection(sectionList []Section) ([]Section, []string) {
-	var otherList []string
+func OtherDetection(sectionList []Section) []Section {
 	for i := range sectionList {
 		if sectionList[i].Type == "" {
-			sectionList[i].Type = "O" + itoa(runeLen(sectionList[i].Value))
-			otherList = append(otherList, sectionList[i].Value)
+			sectionList[i].Type = lengthType('O', runeLen(sectionList[i].Value))
 		}
 	}
-	return sectionList, otherList
+	return sectionList
 }

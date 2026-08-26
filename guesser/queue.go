@@ -1,7 +1,6 @@
 package guesser
 
 import (
-	"container/heap"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -23,41 +22,90 @@ type queueEntry struct {
 
 // max-probability heap of indices into PcfgQueue.entries
 type indexHeap struct {
-	q *PcfgQueue
 	h []int32
 }
 
-func (h indexHeap) Len() int { return len(h.h) }
-
-func (h indexHeap) Less(i, j int) bool {
-	a := &h.q.entries[h.h[i]]
-	b := &h.q.entries[h.h[j]]
+func (q *PcfgQueue) heapLess(i, j int) bool {
+	a := &q.entries[q.heap.h[i]]
+	b := &q.entries[q.heap.h[j]]
 	if a.Prob != b.Prob {
 		return a.Prob > b.Prob
 	}
 	return a.Seq < b.Seq
 }
 
-func (h indexHeap) Swap(i, j int) {
-	h.h[i], h.h[j] = h.h[j], h.h[i]
+func (q *PcfgQueue) heapSwap(i, j int) {
+	q.heap.h[i], q.heap.h[j] = q.heap.h[j], q.heap.h[i]
 }
 
-func (h *indexHeap) Push(x interface{}) {
-	h.h = append(h.h, x.(int32))
+func (q *PcfgQueue) heapUp(j int) {
+	for {
+		i := (j - 1) / 2
+		if j == 0 || !q.heapLess(j, i) {
+			break
+		}
+		q.heapSwap(i, j)
+		j = i
+	}
 }
 
-func (h *indexHeap) Pop() interface{} {
-	old := h.h
-	n := len(old)
-	x := old[n-1]
-	h.h = old[:n-1]
-	return x
+func (q *PcfgQueue) heapDown(i0, n int) {
+	i := i0
+	for {
+		j1 := 2*i + 1
+		if j1 >= n || j1 < 0 {
+			break
+		}
+		j := j1
+		if j2 := j1 + 1; j2 < n && q.heapLess(j2, j1) {
+			j = j2
+		}
+		if !q.heapLess(j, i) {
+			break
+		}
+		q.heapSwap(i, j)
+		i = j
+	}
+}
+
+func (q *PcfgQueue) heapPush(idx int32) {
+	q.heap.h = append(q.heap.h, idx)
+	q.heapUp(len(q.heap.h) - 1)
+}
+
+func (q *PcfgQueue) heapPop() int32 {
+	h := q.heap.h
+	n := len(h) - 1
+	q.heapSwap(0, n)
+	q.heapDown(0, n)
+	idx := h[n]
+	q.heap.h = h[:n]
+	return idx
 }
 
 // popped parse tree handed to a guess worker (short-lived)
 type PTWork struct {
 	Prob float64
 	PT   []packedNode
+}
+
+var ptWorkPool = sync.Pool{
+	New: func() any {
+		return &PTWork{PT: make([]packedNode, 0, 16)}
+	},
+}
+
+func acquirePTWork() *PTWork {
+	return ptWorkPool.Get().(*PTWork)
+}
+
+func releasePTWork(w *PTWork) {
+	if w == nil {
+		return
+	}
+	w.Prob = 0
+	w.PT = w.PT[:0]
+	ptWorkPool.Put(w)
 }
 
 // manage priority queue for guess generation
@@ -93,7 +141,6 @@ func newPcfgQueueWithSave(grammar pcfg.Grammar, base []pcfg.BaseStructure, minPr
 		ptArena:        make([]packedNode, 0, len(base)*4),
 		ptFree:         make([][]uint32, maxPTScratch+1),
 	}
-	q.heap.q = q
 	q.heap.h = make([]int32, 0, len(base))
 
 	if minProb > 0 || maxProb < 1 {
@@ -182,7 +229,7 @@ func (q *PcfgQueue) pushEntry(prob, baseProb float64, ptOff uint32, ptLen uint16
 		PTOff:    ptOff,
 		PTLen:    ptLen,
 	}
-	heap.Push(&q.heap, idx)
+	q.heapPush(idx)
 }
 
 // restore per base structure in parallel, then merge
@@ -332,24 +379,29 @@ func isParentInQueue(ig *IndexedGrammar, pt []packedNode, baseProb, maxProb floa
 
 // pops the highest probability item and pushes its children
 func (q *PcfgQueue) Next() *PTWork {
-	if q.heap.Len() == 0 {
+	if len(q.heap.h) == 0 {
 		return nil
 	}
 
-	idx := heap.Pop(&q.heap).(int32)
+	idx := q.heapPop()
 	e := q.entries[idx]
 	q.MaxProbability = e.Prob
 
 	parent := q.ptSlice(e.PTOff, e.PTLen)
 
-	// owned copy for workers so the arena slot can be freed after children are pushed
-	workPT := make([]packedNode, len(parent))
-	copy(workPT, parent)
+	w := acquirePTWork()
+	if cap(w.PT) < len(parent) {
+		w.PT = make([]packedNode, len(parent))
+	} else {
+		w.PT = w.PT[:len(parent)]
+	}
+	copy(w.PT, parent)
+	w.Prob = e.Prob
 
 	q.pushChildren(parent, e.BaseProb, e.Prob)
 	q.freeEntry(idx)
 
-	return &PTWork{Prob: e.Prob, PT: workPT}
+	return w
 }
 
 func (q *PcfgQueue) pushChildren(parent []packedNode, baseProb, parentProb float64) {
@@ -374,11 +426,6 @@ func (q *PcfgQueue) pushChildren(parent []packedNode, baseProb, parentProb float
 			q.freePT(off, uint16(n))
 		}
 	}
-}
-
-// returns current queue size
-func (q *PcfgQueue) QueueSize() int {
-	return q.heap.Len()
 }
 
 // child is adopted only by its lowest-probability parent (adoption / deadbeat dad)

@@ -4,7 +4,7 @@
    URL: https://github.com/cyclone-github/
    Repo: https://github.com/cyclone-github/pcfg-go/
    Credits: https://github.com/lakiw/pcfg_cracker/
-   Version: 0.5.3 (Go)
+   Version: 0.6.0-dev (Go)
 */
 
 package main
@@ -22,7 +22,7 @@ import (
 	"github.com/cyclone-github/pcfg-go/guesser/omen"
 )
 
-const version = "0.5.3 (Go)"
+const version = "0.6.0-dev (Go)"
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -52,7 +52,7 @@ func main() {
 		os.Exit(0)
 	}
 	if *versionFlag {
-		fmt.Fprintln(os.Stderr, "PCFG Guesser v0.5.3 (Go)")
+		fmt.Fprintln(os.Stderr, "PCFG Guesser v0.6.0-dev (Go)")
 		fmt.Fprintln(os.Stderr, "https://github.com/cyclone-github/pcfg-go/")
 		os.Exit(0)
 	}
@@ -81,7 +81,11 @@ func main() {
 
 	var omenGrammar *omen.Grammar
 	if !*skipBrute {
-		omenGrammar, _ = omen.LoadGrammar(baseDir)
+		omenGrammar, err = omen.LoadGrammar(baseDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading OMEN grammar: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	if *debug {
