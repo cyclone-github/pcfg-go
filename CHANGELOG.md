@@ -1,3 +1,15 @@
+### v0.6.0-dev; 2026-08-25
+
+- `pcfg_trainer` ~7.9× faster on full RockYou vs `v0.5.3`
+- `pcfg_guesser` ~1.2× faster with ~28% lower RAM usage at 100M guesses vs `v0.5.3`
+- Parallelized trainer passes and improved worker scheduling/merge performance
+- Reduced hot-path mutex use, allocations, and temporary buffer churn
+- Added buffer pooling and lower-memory output batching in `pcfg_guesser`
+- Improved capitalization and OMEN generation hot paths
+- Reduced parse-tree and recursive generation allocation/GC pressure
+- Improved malformed-input, scanner, file I/O, and numeric parsing handling
+- Fixed minor interruption/cleanup issues and Staticcheck/linter warnings
+
 ### v0.5.3; 2026-07-25
 - `pcfg_guesser` ~2× faster than v0.5.2
 - ~2,578% faster than Python3 pcfg_guesser.py

@@ -17,7 +17,7 @@ func detectWebsite(section Section) ([]Section, string, string, string) {
 	working := strings.ToLower(original)
 
 	if !strings.Contains(working, ".") {
-		return []Section{section}, "", "", ""
+		return nil, "", "", ""
 	}
 
 	tldList := getTLDList()
@@ -125,7 +125,7 @@ func detectWebsite(section Section) ([]Section, string, string, string) {
 		}
 	}
 
-	return []Section{section}, "", "", ""
+	return nil, "", "", ""
 }
 
 func WebsiteDetection(sectionList []Section) ([]Section, []string, []string, []string) {

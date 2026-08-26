@@ -44,7 +44,7 @@ func (mc *MarkovCracker) findFirstObjectMap(ln map[int][]int) int {
 	return mc.maxLevel
 }
 
-func (mc *MarkovCracker) NextGuess() string {
+func (mc *MarkovCracker) AppendNext(dst []byte) ([]byte, bool) {
 	if mc.curGuess == nil {
 		mc.curLen = [2]int{mc.startLength, 0}
 		mc.curIP = [2]int{mc.startIP, 0}
@@ -58,17 +58,17 @@ func (mc *MarkovCracker) NextGuess() string {
 		)
 	}
 
-	guess := mc.curGuess.NextGuess()
-	for guess == "" {
+	dst, ok := mc.curGuess.AppendNext(dst)
+	for !ok {
 		if !mc.increaseIPForTarget(mc.targetLevel - mc.curLen[0]) {
 			if !mc.increaseLenForTarget() {
 				mc.curGuess = nil
-				return ""
+				return dst, false
 			}
 		}
-		guess = mc.curGuess.NextGuess()
+		dst, ok = mc.curGuess.AppendNext(dst)
 	}
-	return guess
+	return dst, true
 }
 
 func (mc *MarkovCracker) increaseLenForTarget() bool {

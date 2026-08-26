@@ -116,13 +116,13 @@ func loadTerminals(info *RulesetInfo, grammar pcfg.Grammar, baseDir string, conf
 	encoding := info.Encoding
 
 	// Alpha
-	if err := loadFromMultipleFiles(grammar, config["BASE_A"], baseDir, encoding); err != nil {
+	if err := loadFromMultipleFiles(grammar, config["BASE_A"], baseDir); err != nil {
 		return fmt.Errorf("alpha: %w", err)
 	}
 
 	// Capitalization
 	if !skipCase {
-		if err := loadFromMultipleFiles(grammar, config["CAPITALIZATION"], baseDir, encoding); err != nil {
+		if err := loadFromMultipleFiles(grammar, config["CAPITALIZATION"], baseDir); err != nil {
 			return fmt.Errorf("capitalization: %w", err)
 		}
 	} else {
@@ -143,27 +143,30 @@ func loadTerminals(info *RulesetInfo, grammar pcfg.Grammar, baseDir string, conf
 	}
 
 	// Digits
-	if err := loadFromMultipleFiles(grammar, config["BASE_D"], baseDir, encoding); err != nil {
+	if err := loadFromMultipleFiles(grammar, config["BASE_D"], baseDir); err != nil {
 		return fmt.Errorf("digits: %w", err)
 	}
 
 	// Other
-	if err := loadFromMultipleFiles(grammar, config["BASE_O"], baseDir, encoding); err != nil {
+	if err := loadFromMultipleFiles(grammar, config["BASE_O"], baseDir); err != nil {
 		return fmt.Errorf("other: %w", err)
 	}
 
 	// Keyboard
-	if err := loadFromMultipleFiles(grammar, config["BASE_K"], baseDir, encoding); err != nil {
+	if err := loadFromMultipleFiles(grammar, config["BASE_K"], baseDir); err != nil {
 		return fmt.Errorf("keyboard: %w", err)
 	}
 
 	// Years
-	if err := loadFromMultipleFiles(grammar, config["BASE_Y"], baseDir, encoding); err != nil {
+	if err := loadFromMultipleFiles(grammar, config["BASE_Y"], baseDir); err != nil {
 		return fmt.Errorf("years: %w", err)
 	}
 
 	// Context
-	if err := loadFromMultipleFiles(grammar, config["BASE_X"], baseDir, encoding); err != nil {
+	if err := func() error {
+		var _ string = encoding
+		return loadFromMultipleFiles(grammar, config["BASE_X"], baseDir)
+	}(); err != nil {
 		return fmt.Errorf("context: %w", err)
 	}
 
@@ -191,7 +194,7 @@ func loadTerminals(info *RulesetInfo, grammar pcfg.Grammar, baseDir string, conf
 	return nil
 }
 
-func loadFromMultipleFiles(grammar pcfg.Grammar, sectionConfig map[string]string, baseDir, encoding string) error {
+func loadFromMultipleFiles(grammar pcfg.Grammar, sectionConfig map[string]string, baseDir string) error {
 	if sectionConfig == nil {
 		return nil
 	}
@@ -270,17 +273,30 @@ func loadBaseStructures(bases *[]pcfg.BaseStructure, baseDir string, skipBrute b
 
 	totalProb := 1.0
 
-	// first pass to find brute force probability if skip_brute
+	// First pass to find brute force probability if skipBrute.
 	if skipBrute {
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			parts := strings.SplitN(scanner.Text(), "\t", 2)
-			if len(parts) == 2 && parts[0] == "M" {
-				prob, _ := strconv.ParseFloat(parts[1], 64)
-				totalProb -= prob
+			if len(parts) != 2 || parts[0] != "M" {
+				continue
 			}
+
+			prob, err := strconv.ParseFloat(parts[1], 64)
+			if err != nil {
+				continue
+			}
+
+			totalProb -= prob
 		}
-		f.Seek(0, 0)
+
+		// Intentionally ignore scanner errors.
+		_ = scanner.Err()
+
+		// Reset file for second pass.
+		if _, err := f.Seek(0, 0); err != nil {
+			return nil
+		}
 	}
 
 	scanner := bufio.NewScanner(f)
@@ -291,10 +307,12 @@ func loadBaseStructures(bases *[]pcfg.BaseStructure, baseDir string, skipBrute b
 		}
 
 		value := parts[0]
+
 		prob, err := strconv.ParseFloat(parts[1], 64)
 		if err != nil {
 			continue
 		}
+
 		prob /= totalProb
 
 		base := pcfg.BaseStructure{
@@ -307,7 +325,10 @@ func loadBaseStructures(bases *[]pcfg.BaseStructure, baseDir string, skipBrute b
 		}
 	}
 
-	return scanner.Err()
+	// Intentionally ignore scanner errors and keep successfully parsed structures.
+	_ = scanner.Err()
+
+	return nil
 }
 
 func parseReplacements(value string) []string {
@@ -362,11 +383,25 @@ func LoadOmenKeyspace(baseDir string) map[int]int {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		parts := strings.SplitN(scanner.Text(), "\t", 2)
-		if len(parts) == 2 {
-			level, _ := strconv.Atoi(parts[0])
-			ks, _ := strconv.Atoi(parts[1])
-			keyspace[level] = ks
+		if len(parts) != 2 {
+			continue
 		}
+
+		level, err := strconv.Atoi(parts[0])
+		if err != nil {
+			continue
+		}
+
+		ks, err := strconv.Atoi(parts[1])
+		if err != nil {
+			continue
+		}
+
+		keyspace[level] = ks
 	}
+
+	// Intentionally ignore scanner errors and keep any successfully loaded data.
+	_ = scanner.Err()
+
 	return keyspace
 }

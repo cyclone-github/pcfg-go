@@ -58,27 +58,39 @@ func detectYear(section Section) ([]Section, string) {
 			}
 		}
 	}
-	return []Section{section}, ""
+	return nil, ""
 }
 
-func YearDetection(sectionList []Section) ([]Section, []string) {
-	var yearList []string
+func YearDetection(sectionList []Section) []Section {
 	index := 0
 	for index < len(sectionList) {
 		if sectionList[index].Type == "" {
 			parsing, year := detectYear(sectionList[index])
 			if year != "" {
-				yearList = append(yearList, year)
 				sectionList = spliceReplace(sectionList, index, parsing)
 				continue
 			}
 		}
 		index++
 	}
-	return sectionList, yearList
+	return sectionList
 }
 
 func spliceReplace(sl []Section, index int, replacement []Section) []Section {
+	if len(replacement) == 1 {
+		sl[index] = replacement[0]
+		return sl
+	}
+
+	newLen := len(sl) - 1 + len(replacement)
+	if newLen <= cap(sl) {
+		oldLen := len(sl)
+		sl = sl[:newLen]
+		copy(sl[index+len(replacement):], sl[index+1:oldLen])
+		copy(sl[index:], replacement)
+		return sl
+	}
+
 	result := make([]Section, 0, len(sl)-1+len(replacement))
 	result = append(result, sl[:index]...)
 	result = append(result, replacement...)

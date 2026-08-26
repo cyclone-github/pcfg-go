@@ -22,27 +22,43 @@ func NewGuessStructure(cp map[string]map[int][]string, maxLevel int, ip string, 
 	}
 }
 
-func (gs *GuessStructure) NextGuess() string {
+func (gs *GuessStructure) AppendNext(dst []byte) ([]byte, bool) {
+	if !gs.nextParseTree() {
+		return dst, false
+	}
+	return gs.appendGuess(dst), true
+}
+
+func (gs *GuessStructure) appendGuess(dst []byte) []byte {
+	dst = append(dst, gs.ip...)
+	for i := range gs.parseTree {
+		item := &gs.parseTree[i]
+		chars := gs.cp[item.IP][item.Level]
+		if item.Index < len(chars) {
+			dst = append(dst, chars[item.Index]...)
+		}
+	}
+	return dst
+}
+
+func (gs *GuessStructure) nextParseTree() bool {
 	if gs.parseTree == nil {
 		gs.parseTree = gs.fillOutParseTree(gs.ip, gs.cpLength, gs.targetLevel)
-		if gs.parseTree == nil {
-			return ""
-		}
-		return gs.formatGuess()
+		return gs.parseTree != nil
 	}
 
 	last := &gs.parseTree[len(gs.parseTree)-1]
 	cpChars := gs.cp[last.IP][last.Level]
 	if last.Index+1 < len(cpChars) {
 		last.Index++
-		return gs.formatGuess()
+		return true
 	}
 
 	element := *last
 	gs.parseTree = gs.parseTree[:len(gs.parseTree)-1]
 
 	if len(gs.parseTree) == 0 {
-		return ""
+		return false
 	}
 
 	reqLength := 1
@@ -61,7 +77,7 @@ func (gs *GuessStructure) NextGuess() string {
 				newElements := gs.fillOutParseTree(newIP, reqLength, reqLevel-depthLevel)
 				if newElements != nil {
 					gs.parseTree = append(gs.parseTree, newElements...)
-					return gs.formatGuess()
+					return true
 				}
 				last.Index++
 			}
@@ -88,18 +104,7 @@ func (gs *GuessStructure) NextGuess() string {
 		}
 	}
 
-	return ""
-}
-
-func (gs *GuessStructure) formatGuess() string {
-	guess := gs.ip
-	for _, item := range gs.parseTree {
-		chars := gs.cp[item.IP][item.Level]
-		if item.Index < len(chars) {
-			guess += chars[item.Index]
-		}
-	}
-	return guess
+	return false
 }
 
 func (gs *GuessStructure) fillOutParseTree(ip string, length, targetLevel int) []ParseTreeNode {

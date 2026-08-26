@@ -2,12 +2,15 @@ package trainer
 
 import (
 	"sort"
-	"sync"
 )
 
+// Counter is a simple string->count map. It is intentionally lock-free: during
+// the parallel passes each worker owns its own Counter instances, and all
+// merges, snapshots, and reads happen sequentially on the main goroutine after
+// the workers have finished. Avoiding a mutex removes significant overhead from
+// the per-password hot path.
 type Counter struct {
-	mu sync.Mutex
-	M  map[string]int
+	M map[string]int
 }
 
 func NewCounter() *Counter {
@@ -15,40 +18,37 @@ func NewCounter() *Counter {
 }
 
 func (c *Counter) Add(key string, n int) {
-	c.mu.Lock()
 	c.M[key] += n
-	c.mu.Unlock()
 }
 
 func (c *Counter) Inc(key string) {
-	c.mu.Lock()
 	c.M[key]++
-	c.mu.Unlock()
 }
 
 func (c *Counter) AddBatch(entries map[string]int) {
 	if len(entries) == 0 {
 		return
 	}
-	c.mu.Lock()
 	for k, v := range entries {
 		c.M[k] += v
 	}
-	c.mu.Unlock()
 }
 
 func (c *Counter) MergeFrom(other *Counter) {
-	c.AddBatch(other.Snapshot())
+	if len(c.M) == 0 {
+		c.M = other.M
+		return
+	}
+	if len(other.M) > len(c.M) {
+		c.M, other.M = other.M, c.M
+	}
+	c.AddBatch(other.M)
 }
 
+// Snapshot returns the underlying map. Callers must not mutate it. It is
+// returned directly (no copy) since all access is single-goroutine.
 func (c *Counter) Snapshot() map[string]int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	cp := make(map[string]int, len(c.M))
-	for k, v := range c.M {
-		cp[k] = v
-	}
-	return cp
+	return c.M
 }
 
 type CountEntry struct {
@@ -57,9 +57,8 @@ type CountEntry struct {
 }
 
 func (c *Counter) TopN(n int) []CountEntry {
-	snap := c.Snapshot()
-	entries := make([]CountEntry, 0, len(snap))
-	for k, v := range snap {
+	entries := make([]CountEntry, 0, len(c.M))
+	for k, v := range c.M {
 		entries = append(entries, CountEntry{k, v})
 	}
 	sort.Slice(entries, func(i, j int) bool {
@@ -75,8 +74,7 @@ func (c *Counter) TopN(n int) []CountEntry {
 }
 
 type LenIndexedCounters struct {
-	mu sync.Mutex
-	M  map[int]*Counter
+	M map[int]*Counter
 }
 
 func NewLenIndexedCounters() *LenIndexedCounters {
@@ -84,19 +82,15 @@ func NewLenIndexedCounters() *LenIndexedCounters {
 }
 
 func (l *LenIndexedCounters) Inc(length int, value string) {
-	l.mu.Lock()
 	c, ok := l.M[length]
 	if !ok {
 		c = NewCounter()
 		l.M[length] = c
 	}
-	l.mu.Unlock()
 	c.Inc(value)
 }
 
 func (l *LenIndexedCounters) Keys() []int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	keys := make([]int, 0, len(l.M))
 	for k := range l.M {
 		keys = append(keys, k)
@@ -105,25 +99,19 @@ func (l *LenIndexedCounters) Keys() []int {
 }
 
 func (l *LenIndexedCounters) Get(length int) *Counter {
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	return l.M[length]
 }
 
 func (l *LenIndexedCounters) MergeFrom(other *LenIndexedCounters) {
-	for _, length := range other.Keys() {
-		otherCounter := other.Get(length)
-		snap := otherCounter.Snapshot()
-		if len(snap) == 0 {
+	for length, otherCounter := range other.M {
+		if len(otherCounter.M) == 0 {
 			continue
 		}
-		l.mu.Lock()
 		c, ok := l.M[length]
 		if !ok {
-			c = NewCounter()
-			l.M[length] = c
+			l.M[length] = otherCounter
+			continue
 		}
-		l.mu.Unlock()
-		c.AddBatch(snap)
+		c.MergeFrom(otherCounter)
 	}
 }

@@ -18,9 +18,20 @@ func LoadPasswordsToSlice(filename string, prefixCount bool) ([]string, int, int
 	defer f.Close()
 
 	var passwords []string
+	if info, statErr := f.Stat(); statErr == nil && info.Size() > 0 {
+		const estimatedBytesPerPassword = 10
+		const maxPreallocatedPasswords = 32 * 1024 * 1024
+		estimatedPasswords := info.Size() / estimatedBytesPerPassword
+		if estimatedPasswords > maxPreallocatedPasswords {
+			estimatedPasswords = maxPreallocatedPasswords
+		}
+		if estimatedPasswords > 0 && estimatedPasswords <= int64(^uint(0)>>1) {
+			passwords = make([]string, 0, int(estimatedPasswords))
+		}
+	}
 	var numPasswords, numEncodingErr int
-	dupDetection := make(map[string]bool)
 	numToCheck := 100000
+	dupDetection := make(map[string]bool, numToCheck)
 	var duplicatesFound bool
 
 	scanner := bufio.NewScanner(f)
@@ -78,6 +89,8 @@ func LoadPasswordsToSlice(filename string, prefixCount bool) ([]string, int, int
 			} else {
 				dupDetection[cleanPassword] = true
 			}
+		} else if !duplicatesFound {
+			dupDetection = nil
 		}
 
 		for i := 0; i < n; i++ {
