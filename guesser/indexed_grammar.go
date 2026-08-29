@@ -114,6 +114,28 @@ func (ig *IndexedGrammar) typeName(t TypeID) string {
 	return ig.name[t]
 }
 
+// skip C so keys match trainer BaseStructureCreation
+func (ig *IndexedGrammar) structureKey(pt []packedNode) string {
+	n := 0
+	for _, node := range pt {
+		if ig.category(node.Type) == 'C' {
+			continue
+		}
+		n += len(ig.typeName(node.Type))
+	}
+	if n == 0 {
+		return ""
+	}
+	b := make([]byte, 0, n)
+	for _, node := range pt {
+		if ig.category(node.Type) == 'C' {
+			continue
+		}
+		b = append(b, ig.typeName(node.Type)...)
+	}
+	return string(b)
+}
+
 func (ig *IndexedGrammar) packPT(replacements []string) []packedNode {
 	pt := make([]packedNode, len(replacements))
 	for i, r := range replacements {

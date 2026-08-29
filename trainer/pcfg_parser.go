@@ -105,18 +105,32 @@ func NewPCFGParser(mwd *parser.TrieMultiWordDetector) *PCFGParser {
 	}
 }
 
-func (p *PCFGParser) Parse(password string) {
-	sectionList := parser.DetectKeyboardWalk(password, p.sectionScratch)
+// keyboard, email/url, year, context, alpha/multiword, digit, other
+func (p *PCFGParser) detect(password string) (sectionList []parser.Section, emails, providers, urls, hosts, prefixes []string) {
+	sectionList = parser.DetectKeyboardWalk(password, p.sectionScratch)
+	sectionList, emails, providers = parser.EmailDetection(sectionList)
+	sectionList, urls, hosts, prefixes = parser.WebsiteDetection(sectionList)
+	sectionList = parser.YearDetection(sectionList)
+	sectionList = parser.ContextSensitiveDetection(sectionList)
+	sectionList, p.replacementScratch = parser.AlphaDetection(
+		sectionList,
+		p.MultiwordDetector,
+		p.replacementScratch,
+	)
+	sectionList, p.replacementScratch = parser.DigitDetection(sectionList, p.replacementScratch)
+	sectionList = parser.OtherDetection(sectionList)
+	p.sectionScratch = sectionList
+	return sectionList, emails, providers, urls, hosts, prefixes
+}
 
-	sectionList, emails, providers := parser.EmailDetection(sectionList)
+func (p *PCFGParser) Parse(password string) {
+	sectionList, emails, providers, urls, hosts, prefixes := p.detect(password)
 	for _, e := range emails {
 		p.CountEmails.Inc(e)
 	}
 	for _, pr := range providers {
 		p.CountEmailProv.Inc(pr)
 	}
-
-	sectionList, urls, hosts, prefixes := parser.WebsiteDetection(sectionList)
 	for _, u := range urls {
 		p.CountWebsiteURLs.Inc(u)
 	}
@@ -128,16 +142,6 @@ func (p *PCFGParser) Parse(password string) {
 			p.CountWebsitePfx.Inc(pf)
 		}
 	}
-
-	sectionList = parser.YearDetection(sectionList)
-	sectionList = parser.ContextSensitiveDetection(sectionList)
-	sectionList, p.replacementScratch = parser.AlphaDetection(
-		sectionList,
-		p.MultiwordDetector,
-		p.replacementScratch,
-	)
-	sectionList, p.replacementScratch = parser.DigitDetection(sectionList, p.replacementScratch)
-	sectionList = parser.OtherDetection(sectionList)
 
 	for _, section := range sectionList {
 		sectionType := section.Type
@@ -170,7 +174,19 @@ func (p *PCFGParser) Parse(password string) {
 		p.CountBaseStructs.Inc(baseStruct)
 	}
 	p.CountRawBaseStructs.Inc(baseStruct)
-	p.sectionScratch = sectionList
+}
+
+// same detect path as Parse without updating counters
+func (p *PCFGParser) BaseStructureOf(password string) (string, bool) {
+	if p == nil || !parser.CheckValid(password) {
+		return "", false
+	}
+	sectionList, _, _, _, _, _ := p.detect(password)
+	ok, key := parser.BaseStructureCreation(sectionList)
+	if !ok || key == "" {
+		return "", false
+	}
+	return key, true
 }
 
 func (p *PCFGParser) MergeFrom(other *PCFGParser) {

@@ -4,7 +4,7 @@
    URL: https://github.com/cyclone-github/
    Repo: https://github.com/cyclone-github/pcfg-go/
    Credits: https://github.com/lakiw/pcfg_cracker/
-   Version: 0.6.0-dev (Go)
+   Version: 0.6.1-dev.20260829-1059 (Go)
 */
 
 package main
@@ -100,7 +100,7 @@ func main() {
 
 	info := &trainer.ProgramInfo{
 		Name:         "PCFG Trainer",
-		Version:      "0.6.0-dev (Go)",
+		Version:      "0.6.1-dev.20260829-1059 (Go)",
 		Author:       "cyclone",
 		Contact:      "https://github.com/cyclone-github/",
 		RuleName:     "Default",
@@ -136,7 +136,7 @@ func main() {
 		os.Exit(0)
 	}
 	if *versionFlag {
-		fmt.Fprintln(os.Stderr, "PCFG Trainer v0.6.0-dev (Go)")
+		fmt.Fprintln(os.Stderr, "PCFG Trainer v0.6.1-dev.20260829-1059 (Go)")
 		fmt.Fprintln(os.Stderr, "https://github.com/cyclone-github/pcfg-go/")
 		os.Exit(0)
 	}
@@ -230,7 +230,7 @@ func runTrainer(info *trainer.ProgramInfo, baseDir string) error {
 	fmt.Println()
 
 	ag := trainer.NewAlphabetGenerator(info.AlphabetSize, info.NGram)
-	mwd := parser.NewTrieMultiWordDetector(5, 4, 21)
+	mwd := parser.NewTrieMultiWordDetector(parser.DefaultThreshold, parser.DefaultMinLen, parser.DefaultMaxLen)
 
 	if info.Multiword != "" {
 		fmt.Println("-------------------------------------------------")

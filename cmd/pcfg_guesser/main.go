@@ -4,7 +4,7 @@
    URL: https://github.com/cyclone-github/
    Repo: https://github.com/cyclone-github/pcfg-go/
    Credits: https://github.com/lakiw/pcfg_cracker/
-   Version: 0.6.0-dev (Go)
+   Version: 0.6.1-dev.20260829-1059 (Go)
 */
 
 package main
@@ -22,7 +22,7 @@ import (
 	"github.com/cyclone-github/pcfg-go/guesser/omen"
 )
 
-const version = "0.6.0-dev (Go)"
+const version = "0.6.1-dev.20260829-1059 (Go)"
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -38,6 +38,7 @@ func main() {
 	skipBrute := flag.Bool("b", false, "Skip OMEN/Markov guesses")
 	allLower := flag.Bool("a", false, "No case mangling")
 	debug := flag.Bool("d", false, "Debug output instead of guesses")
+	autoFile := flag.String("auto", "", "Auto-steer PCFG probabilities using recovered founds")
 
 	flag.Parse()
 
@@ -52,7 +53,7 @@ func main() {
 		os.Exit(0)
 	}
 	if *versionFlag {
-		fmt.Fprintln(os.Stderr, "PCFG Guesser v0.6.0-dev (Go)")
+		fmt.Fprintln(os.Stderr, "PCFG Guesser v0.6.1-dev.20260829-1059 (Go)")
 		fmt.Fprintln(os.Stderr, "https://github.com/cyclone-github/pcfg-go/")
 		os.Exit(0)
 	}
@@ -136,6 +137,26 @@ func main() {
 		}
 	} else {
 		gen = guesser.NewParallelGuessGenerator(g, base, omenGrammar, *debug)
+	}
+
+	if *autoFile != "" {
+		if st, err := os.Stat(*autoFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot open -auto founds file: %v\n", err)
+			os.Exit(1)
+		} else if st.IsDir() {
+			fmt.Fprintf(os.Stderr, "Error: -auto path is a directory: %s\n", *autoFile)
+			os.Exit(1)
+		}
+		f, err := os.Open(*autoFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot read -auto founds file: %v\n", err)
+			os.Exit(1)
+		}
+		if err := f.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot read -auto founds file: %v\n", err)
+			os.Exit(1)
+		}
+		gen.SetAuto(*autoFile)
 	}
 
 	totalGuesses, err := gen.RunParallelWithSession(*limit, savePath, info.RuleName, info.UUID, *skipBrute, *allLower)

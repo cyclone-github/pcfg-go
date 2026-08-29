@@ -6,6 +6,12 @@ import (
 	"unicode/utf8"
 )
 
+const (
+	DefaultThreshold = 5
+	DefaultMinLen    = 4
+	DefaultMaxLen    = 21
+)
+
 type TrieMultiWordDetector struct {
 	Threshold   int
 	MinLen      int

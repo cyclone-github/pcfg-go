@@ -1,3 +1,6 @@
+### v0.6.1-dev.20260829-1059; 2026-08-29
+- `pcfg_guesser -auto` mode creates a live feedback loop which steers PCFG runtime probabilities towards those which are generating founds
+
 ### v0.6.0-dev; 2026-08-25
 
 - `pcfg_trainer` ~7.9× faster on full RockYou vs `v0.5.3`

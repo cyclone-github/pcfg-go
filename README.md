@@ -74,6 +74,12 @@ Generate guesses from a trained ruleset:
 pcfg_guesser -r rule_name
 ```
 
+Auto PCFG steering from new founds.
+
+```bash
+pcfg_guesser -r rule_name -auto founds_file.pot | hashcat -m 0 hashes.txt -o founds_file.pot ...
+```
+
 Session save/restore:
 
 ```bash
@@ -131,6 +137,7 @@ pcfg-go vs pcfg-python3 flags
 | -b | --skip_brute | Skip OMEN/Markov |
 | -a | --all_lower | No case mangling |
 | -d | --debug | Debug output |
+| -auto | Auto-steer PCFG from founds file |
 | -h | --help | Help |
 | -version | --version | Version info |
 

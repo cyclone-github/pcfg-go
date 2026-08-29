@@ -1,6 +1,7 @@
 package guesser
 
 import (
+	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -13,7 +14,8 @@ const maxPTScratch = 256
 
 // stored by value in a contiguous slice (no per-item heap object)
 type queueEntry struct {
-	Prob     float64
+	Prob     float64 // heap key (trained * multiplier when -auto)
+	Trained  float64 // original findProb; sessions and adoption
 	BaseProb float64
 	Seq      int64
 	PTOff    uint32
@@ -116,6 +118,7 @@ type PcfgQueue struct {
 	ptArena        []packedNode
 	ptFree         [][]uint32 // length -> free offsets into ptArena
 	ig             *IndexedGrammar
+	steer          *AutoSteerer
 	MaxProbability float64
 	MinProbability float64
 	seqCounter     atomic.Int64
@@ -155,7 +158,7 @@ func newPcfgQueueWithSave(grammar pcfg.Grammar, base []pcfg.BaseStructure, minPr
 				pt[j] = packedNode{Type: ig.intern(r), Index: 0}
 			}
 			prob := ig.findProb(pt, b.Prob)
-			q.pushEntry(prob, b.Prob, off, uint16(len(b.Replacements)))
+			q.pushEntry(q.effective(pt, prob), prob, b.Prob, off, uint16(len(b.Replacements)))
 		}
 	}
 
@@ -219,17 +222,45 @@ func (q *PcfgQueue) freeEntry(idx int32) {
 	q.freeEntries = append(q.freeEntries, idx)
 }
 
-func (q *PcfgQueue) pushEntry(prob, baseProb float64, ptOff uint32, ptLen uint16) {
+func (q *PcfgQueue) pushEntry(prob, trained, baseProb float64, ptOff uint32, ptLen uint16) {
 	idx := q.allocEntry()
 	seq := q.seqCounter.Add(1)
 	q.entries[idx] = queueEntry{
 		Prob:     prob,
+		Trained:  trained,
 		BaseProb: baseProb,
 		Seq:      seq,
 		PTOff:    ptOff,
 		PTLen:    ptLen,
 	}
 	q.heapPush(idx)
+}
+
+func (q *PcfgQueue) effective(pt []packedNode, trained float64) float64 {
+	if q.steer == nil {
+		return trained
+	}
+	p := trained * q.steer.Multiplier(q.ig.structureKey(pt))
+	if p <= 0 || math.IsNaN(p) || math.IsInf(p, 0) {
+		return trained
+	}
+	return p
+}
+
+// reweight heap keys on the popper goroutine
+func (q *PcfgQueue) applyAutoBatch(batch autoBatch) {
+	if q.steer == nil {
+		return
+	}
+	q.steer.ApplyBatch(batch.counts, batch.n)
+	for _, idx := range q.heap.h {
+		e := &q.entries[idx]
+		e.Prob = q.effective(q.ptSlice(e.PTOff, e.PTLen), e.Trained)
+	}
+	n := len(q.heap.h)
+	for i := n/2 - 1; i >= 0; i-- {
+		q.heapDown(i, n)
+	}
 }
 
 // restore per base structure in parallel, then merge
@@ -286,7 +317,7 @@ func restoreProbOrderParallel(q *PcfgQueue, base []pcfg.BaseStructure, minProb, 
 		c := &all[i]
 		off := q.allocPT(len(c.pt))
 		copy(q.ptSlice(off, uint16(len(c.pt))), c.pt)
-		q.pushEntry(c.prob, c.baseProb, off, uint16(len(c.pt)))
+		q.pushEntry(q.effective(c.pt, c.prob), c.prob, c.baseProb, off, uint16(len(c.pt)))
 	}
 }
 
@@ -385,7 +416,7 @@ func (q *PcfgQueue) Next() *PTWork {
 
 	idx := q.heapPop()
 	e := q.entries[idx]
-	q.MaxProbability = e.Prob
+	q.MaxProbability = e.Trained
 
 	parent := q.ptSlice(e.PTOff, e.PTLen)
 
@@ -398,7 +429,7 @@ func (q *PcfgQueue) Next() *PTWork {
 	copy(w.PT, parent)
 	w.Prob = e.Prob
 
-	q.pushChildren(parent, e.BaseProb, e.Prob)
+	q.pushChildren(parent, e.BaseProb, e.Trained)
 	q.freeEntry(idx)
 
 	return w
@@ -421,7 +452,7 @@ func (q *PcfgQueue) pushChildren(parent []packedNode, baseProb, parentProb float
 
 		if areYouMyChild(q.ig, child, baseProb, pos, parentProb, &scratch) {
 			childProb := q.ig.findProb(child, baseProb)
-			q.pushEntry(childProb, baseProb, off, uint16(n))
+			q.pushEntry(q.effective(child, childProb), childProb, baseProb, off, uint16(n))
 		} else {
 			q.freePT(off, uint16(n))
 		}

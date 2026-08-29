@@ -90,6 +90,32 @@ type ParallelGuessGenerator struct {
 	// from previous session when resuming with -l (accumulated stats)
 	prevRunningTime      int64
 	originalFirstStarted string // RFC3339, preserved when resuming
+
+	autoPath string
+}
+
+func (g *ParallelGuessGenerator) applyAutoUpdate(batch autoBatch) {
+	g.Queue.applyAutoBatch(batch)
+	fmt.Fprintf(os.Stderr, "[auto] %d new founds analyzed, PCFG priorities updated\n", batch.n)
+	if g.Queue.steer == nil {
+		return
+	}
+	tops := g.Queue.steer.topBoosts(3)
+	if len(tops) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[auto] top boosts:")
+	for i, t := range tops {
+		if i > 0 {
+			fmt.Fprint(os.Stderr, ",")
+		}
+		fmt.Fprintf(os.Stderr, " %s %.2fx", t.Key, t.Mult)
+	}
+	fmt.Fprintln(os.Stderr)
+}
+
+func (g *ParallelGuessGenerator) SetAuto(path string) {
+	g.autoPath = path
 }
 
 // creates a generator that uses parallel workers
@@ -137,6 +163,18 @@ func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, r
 		cancel()
 	}()
 
+	var autoCh <-chan autoBatch
+	if g.autoPath != "" {
+		g.Queue.steer = newAutoSteerer(g.Base)
+		ch, err := startAutoWatcher(ctx, g.autoPath, g.Debug, autoPollInterval, autoMinFounds, newAutoParser(g.Queue.IndexedGrammar()).BaseStructureOf)
+		if err != nil {
+			cancel()
+			return 0, err
+		}
+		autoCh = ch
+		fmt.Fprintln(os.Stderr, "[auto] running")
+	}
+
 	// always save on exit: normal, signal, or panic. Works for first run and -l (load)
 	defer func() {
 		currentRunTime := int64(time.Since(g.startTime).Seconds())
@@ -155,11 +193,11 @@ func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, r
 		}
 	}()
 
-	return g.runParallelWithCtx(ctx, limit, cancel)
+	return g.runParallelWithCtx(ctx, limit, cancel, autoCh)
 }
 
 // stops the popper and workers (SIGINT/SIGTERM, broken pipe, or -n limit reached)
-func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit int64, cancelRun func()) (int64, error) {
+func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit int64, cancelRun func(), autoCh <-chan autoBatch) (int64, error) {
 	numWorkers := runtime.NumCPU()
 	if numWorkers < 1 {
 		numWorkers = 1
@@ -194,10 +232,20 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 		defer wg.Done()
 		defer close(ptChan)
 		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
+			if autoCh != nil {
+				select {
+				case <-ctx.Done():
+					return
+				case batch := <-autoCh:
+					g.applyAutoUpdate(batch)
+				default:
+				}
+			} else {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
 			}
 			ptItem := g.Queue.Next()
 			if ptItem == nil {
