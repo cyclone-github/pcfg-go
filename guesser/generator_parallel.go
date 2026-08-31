@@ -23,11 +23,16 @@ import (
 var errStop = errors.New("stop")
 
 const (
-	ptChanSize     = 1024            // PT items buffered for workers
-	outputChanSize = 256             // enough that workers rarely stall; RAM stays bounded
-	batchSize      = 65536           // 64KB per batch
-	batchCap       = batchSize * 2   // worker scratch / pooled buffer capacity
-	writerBufSize  = 8 * 1024 * 1024 // 8MB bufio
+	ptChanSize     = 256           // PT items buffered for workers
+	outputChanSize = 8             // worker -> writer batches
+	batchSize      = 65536         // 64KB per batch
+	batchCap       = batchSize * 2 // worker scratch / pooled buffer capacity
+	writerBufSize  = 64 * 1024     // stdout bufio
+
+	// shallower pipe when -auto so founds line up with current heap, not a minutes-old backlog
+	autoPtChanSize     = 2
+	autoOutputChanSize = 4
+	autoWriterBufSize  = 32 * 1024
 )
 
 // reused 64KB output batches to avoid a heap alloc+copy on every flush
@@ -125,7 +130,6 @@ func NewParallelGuessGenerator(grammar pcfg.Grammar, base []pcfg.BaseStructure, 
 		Queue:       NewPcfgQueue(grammar, base),
 		Debug:       debug,
 		OmenGrammar: omenGrammar,
-		outputChan:  make(chan []byte, outputChanSize),
 		startTime:   time.Now(),
 	}
 }
@@ -137,7 +141,6 @@ func NewParallelGuessGeneratorWithQueueAndRestore(grammar pcfg.Grammar, base []p
 		Queue:                queue,
 		Debug:                debug,
 		OmenGrammar:          omenGrammar,
-		outputChan:           make(chan []byte, outputChanSize),
 		startTime:            time.Now(),
 		prevRunningTime:      sav.RunningTime,
 		originalFirstStarted: sav.FirstStarted,
@@ -204,7 +207,13 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 	}
 
 	ig := g.Queue.IndexedGrammar()
-	writer := bufio.NewWriterSize(os.Stdout, writerBufSize)
+
+	ptBuf, outBuf, wrBuf := ptChanSize, outputChanSize, writerBufSize
+	if g.autoPath != "" {
+		ptBuf, outBuf, wrBuf = autoPtChanSize, autoOutputChanSize, autoWriterBufSize
+	}
+	g.outputChan = make(chan []byte, outBuf)
+	writer := bufio.NewWriterSize(os.Stdout, wrBuf)
 
 	var wg sync.WaitGroup
 
@@ -225,7 +234,7 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 	}()
 
 	// popper goroutine: pop PT items, send to workers
-	ptChan := make(chan *PTWork, ptChanSize)
+	ptChan := make(chan *PTWork, ptBuf)
 
 	wg.Add(1)
 	go func() {
@@ -261,11 +270,26 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 				releasePTWork(ptItem)
 				continue
 			}
-			select {
-			case ptChan <- ptItem:
-			case <-ctx.Done():
-				releasePTWork(ptItem)
-				return
+			if autoCh != nil {
+				// stay responsive to -auto while blocked on a slow hashcat pipe
+				for sent := false; !sent; {
+					select {
+					case <-ctx.Done():
+						releasePTWork(ptItem)
+						return
+					case batch := <-autoCh:
+						g.applyAutoUpdate(batch)
+					case ptChan <- ptItem:
+						sent = true
+					}
+				}
+			} else {
+				select {
+				case ptChan <- ptItem:
+				case <-ctx.Done():
+					releasePTWork(ptItem)
+					return
+				}
 			}
 		}
 	}()
