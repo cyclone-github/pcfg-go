@@ -4,7 +4,7 @@
    URL: https://github.com/cyclone-github/
    Repo: https://github.com/cyclone-github/pcfg-go/
    Credits: https://github.com/lakiw/pcfg_cracker/
-   Version: 0.6.1-dev.20260831-1056 (Go)
+   Version: 0.6.1-dev.20260906-1417 (Go)
 */
 
 package main
@@ -22,7 +22,7 @@ import (
 	"github.com/cyclone-github/pcfg-go/guesser/omen"
 )
 
-const version = "0.6.1-dev.20260831-1056 (Go)"
+const version = "0.6.1-dev.20260906-1417 (Go)"
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -38,7 +38,7 @@ func main() {
 	skipBrute := flag.Bool("b", false, "Skip OMEN/Markov guesses")
 	allLower := flag.Bool("a", false, "No case mangling")
 	debug := flag.Bool("d", false, "Debug output instead of guesses")
-	autoFile := flag.String("auto", "", "Auto-steer PCFG probabilities using recovered founds")
+	autoFile := flag.String("auto", "", "Auto/adaptive PCFG steering using recovered founds")
 
 	flag.Parse()
 
@@ -53,7 +53,7 @@ func main() {
 		os.Exit(0)
 	}
 	if *versionFlag {
-		fmt.Fprintln(os.Stderr, "PCFG Guesser v0.6.1-dev.20260831-1056 (Go)")
+		fmt.Fprintln(os.Stderr, "PCFG Guesser v0.6.1-dev.20260906-1417 (Go)")
 		fmt.Fprintln(os.Stderr, "https://github.com/cyclone-github/pcfg-go/")
 		os.Exit(0)
 	}

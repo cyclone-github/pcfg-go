@@ -1,6 +1,10 @@
-### v0.6.1-dev.20260831-1056; 2026-08-31
-- `pcfg_guesser -auto` mode creates a live feedback loop which steers PCFG runtime probabilities towards those which are generating founds
+### v0.6.1-dev.20260906-1417; 2026-09-06
+- `pcfg_guesser -auto` adaptive mode creates a live feedback loop which steers PCFG runtime probabilities towards those which are generating founds
 - Smaller default stdout/PT queues (256/8/64K); `-auto` uses a shallower pipe (2/4/32K) to cut founds lag
+- Fixed Ctrl+C shutdown with `-auto` adaptive mode
+- Fixed `-auto` adaptive prior normalization
+
+### v0.6.0-dev; 2026-08-25
 - `pcfg_trainer` ~7.9× faster on full RockYou vs `v0.5.3`
 - `pcfg_guesser` ~1.2× faster with ~28% lower RAM usage at 100M guesses vs `v0.5.3`
 - Parallelized trainer passes and improved worker scheduling/merge performance

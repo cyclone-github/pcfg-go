@@ -4,7 +4,7 @@
    URL: https://github.com/cyclone-github/
    Repo: https://github.com/cyclone-github/pcfg-go/
    Credits: https://github.com/lakiw/pcfg_cracker/
-   Version: 0.6.1-dev.20260831-1056 (Go)
+   Version: 0.6.1-dev.20260906-1417 (Go)
 */
 
 package main
@@ -100,7 +100,7 @@ func main() {
 
 	info := &trainer.ProgramInfo{
 		Name:         "PCFG Trainer",
-		Version:      "0.6.1-dev.20260831-1056 (Go)",
+		Version:      "0.6.1-dev.20260906-1417 (Go)",
 		Author:       "cyclone",
 		Contact:      "https://github.com/cyclone-github/",
 		RuleName:     "Default",
@@ -136,7 +136,7 @@ func main() {
 		os.Exit(0)
 	}
 	if *versionFlag {
-		fmt.Fprintln(os.Stderr, "PCFG Trainer v0.6.1-dev.20260831-1056 (Go)")
+		fmt.Fprintln(os.Stderr, "PCFG Trainer v0.6.1-dev.20260906-1417 (Go)")
 		fmt.Fprintln(os.Stderr, "https://github.com/cyclone-github/pcfg-go/")
 		os.Exit(0)
 	}

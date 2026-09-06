@@ -36,6 +36,17 @@ func newAutoSteerer(base []pcfg.BaseStructure) *AutoSteerer {
 		}
 		prior[key] += base[i].Prob
 	}
+
+	pcfgMass := 0.0
+	for _, p := range prior {
+		pcfgMass += p
+	}
+	if pcfgMass > autoPriorFloor {
+		for key, p := range prior {
+			prior[key] = p / pcfgMass
+		}
+	}
+
 	return &AutoSteerer{
 		prior: prior,
 		state: make(map[string]float64),

@@ -157,13 +157,24 @@ func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, r
 	signal.Ignore(syscall.SIGPIPE)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	var interrupted atomic.Bool
+	interruptCh := make(chan struct{})
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 
 	go func() {
-		<-sigCh
-		fmt.Fprintln(os.Stderr, "Saving session...")
-		cancel()
+		select {
+		case <-sigCh:
+			interrupted.Store(true)
+			close(interruptCh)
+			fmt.Fprintln(os.Stderr, "Saving session...")
+			// Stop intercepting signals after the first one so a second Ctrl+C
+			// uses the OS default and can force termination if shutdown stalls.
+			signal.Stop(sigCh)
+			cancel()
+		case <-ctx.Done():
+		}
 	}()
 
 	var autoCh <-chan autoBatch
@@ -196,11 +207,11 @@ func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, r
 		}
 	}()
 
-	return g.runParallelWithCtx(ctx, limit, cancel, autoCh)
+	return g.runParallelWithCtx(ctx, limit, cancel, autoCh, &interrupted, interruptCh)
 }
 
 // stops the popper and workers (SIGINT/SIGTERM, broken pipe, or -n limit reached)
-func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit int64, cancelRun func(), autoCh <-chan autoBatch) (int64, error) {
+func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit int64, cancelRun func(), autoCh <-chan autoBatch, interrupted *atomic.Bool, interruptCh <-chan struct{}) (int64, error) {
 	numWorkers := runtime.NumCPU()
 	if numWorkers < 1 {
 		numWorkers = 1
@@ -215,13 +226,13 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 	g.outputChan = make(chan []byte, outBuf)
 	writer := bufio.NewWriterSize(os.Stdout, wrBuf)
 
-	var wg sync.WaitGroup
+	var writerWg sync.WaitGroup
 
 	// writer goroutine: consume batches from outputChan
 	// on broken pipe (e.g. pv exits), cancel so we save instead of spinning
-	wg.Add(1)
+	writerWg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer writerWg.Done()
 		defer writer.Flush()
 		for buf := range g.outputChan {
 			_, err := writer.Write(buf)
@@ -236,9 +247,10 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 	// popper goroutine: pop PT items, send to workers
 	ptChan := make(chan *PTWork, ptBuf)
 
-	wg.Add(1)
+	var popperWg sync.WaitGroup
+	popperWg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer popperWg.Done()
 		defer close(ptChan)
 		for {
 			if autoCh != nil {
@@ -318,12 +330,17 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 				runes:  make([]rune, 0, 64),
 			}
 
-			flushBatch := func() {
+			flushBatch := func() error {
 				if len(batch) == 0 {
-					return
+					return nil
 				}
-				g.outputChan <- batch
-				batch = getBatch()
+				select {
+				case g.outputChan <- batch:
+					batch = getBatch()
+					return nil
+				case <-interruptCh:
+					return errStop
+				}
 			}
 
 			var localGuesses int64
@@ -336,6 +353,12 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 			}
 
 			output := func(guess []byte) error {
+				select {
+				case <-interruptCh:
+					return errStop
+				default:
+				}
+
 				if limit > 0 {
 					v := remaining.Add(-1)
 					if v < 0 {
@@ -350,7 +373,9 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 				batch = append(batch, guess...)
 				batch = append(batch, '\n')
 				if len(batch) >= batchSize {
-					flushBatch()
+					if err := flushBatch(); err != nil {
+						return err
+					}
 				}
 				return nil
 			}
@@ -361,21 +386,29 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 					break
 				}
 				guessBuf = guessBuf[:0]
-				g.recursiveGuesses(ig, guessBuf, ptItem.PT, output, omenOpt, sc, true)
+				err := g.recursiveGuesses(ig, guessBuf, ptItem.PT, output, omenOpt, sc, true)
 				releasePTWork(ptItem)
+				if errors.Is(err, errStop) {
+					break
+				}
 			}
-			flushBatch()
+			_ = flushBatch()
 			flushCounts()
 			putBatch(batch)
 		}()
 	}
 
-	go func() {
-		workerWg.Wait()
-		close(g.outputChan)
-	}()
-
-	wg.Wait()
+	// Wait for queue mutation and candidate generation to stop before saving.
+	// On Ctrl+C, do not wait for the stdout writer: hashcat may already have
+	// stopped reading stdin while it saves its own session, which can leave a
+	// pipe write blocked indefinitely. The process exit will close stdout.
+	popperWg.Wait()
+	workerWg.Wait()
+	close(g.outputChan)
+	if interrupted != nil && interrupted.Load() {
+		return g.totalGuesses.Load(), nil
+	}
+	writerWg.Wait()
 	return g.totalGuesses.Load(), nil
 }
 

@@ -112,6 +112,47 @@ func TestClassifyRejectsEmptyAndControls(t *testing.T) {
 	}
 }
 
+func TestAutoPriorNormalization(t *testing.T) {
+	base := []pcfg.BaseStructure{
+		{Prob: 0.12, Replacements: []string{"A5", "D4"}},
+		{Prob: 0.48, Replacements: []string{"A6"}},
+		{Prob: 0.40, Replacements: []string{"M"}},
+	}
+	s := newAutoSteerer(base)
+
+	if got := s.prior["A5D4"]; math.Abs(got-0.20) > 1e-12 {
+		t.Fatalf("A5D4 prior=%v want 0.20", got)
+	}
+	if got := s.prior["A6"]; math.Abs(got-0.80) > 1e-12 {
+		t.Fatalf("A6 prior=%v want 0.80", got)
+	}
+
+	sum := 0.0
+	for _, p := range s.prior {
+		sum += p
+	}
+	if math.Abs(sum-1.0) > 1e-12 {
+		t.Fatalf("prior sum=%v want 1.0", sum)
+	}
+}
+
+func TestAutoMatchingDistributionStaysNeutral(t *testing.T) {
+	base := []pcfg.BaseStructure{
+		{Prob: 0.12, Replacements: []string{"A5", "D4"}},
+		{Prob: 0.48, Replacements: []string{"A6"}},
+		{Prob: 0.40, Replacements: []string{"M"}},
+	}
+	s := newAutoSteerer(base)
+	s.ApplyBatch(map[string]int{"A5D4": 20, "A6": 80}, 100)
+
+	if got := s.Multiplier("A5D4"); math.Abs(got-1.0) > 1e-12 {
+		t.Fatalf("A5D4 multiplier=%v want 1.0", got)
+	}
+	if got := s.Multiplier("A6"); math.Abs(got-1.0) > 1e-12 {
+		t.Fatalf("A6 multiplier=%v want 1.0", got)
+	}
+}
+
 func TestSmoothingAndBounds(t *testing.T) {
 	s := &AutoSteerer{
 		prior: map[string]float64{"A5D4": 0.05, "A6D4": 0.10, "D4A4": 0.20},
