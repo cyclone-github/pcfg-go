@@ -14,7 +14,7 @@ const maxPTScratch = 256
 
 // stored by value in a contiguous slice (no per-item heap object)
 type queueEntry struct {
-	Prob     float64 // heap key (trained * multiplier when -auto)
+	Prob     float64 // heap key (trained * multiplier when -adaptive)
 	Trained  float64 // original findProb; sessions and adoption
 	BaseProb float64
 	Seq      int64
@@ -118,7 +118,7 @@ type PcfgQueue struct {
 	ptArena        []packedNode
 	ptFree         [][]uint32 // length -> free offsets into ptArena
 	ig             *IndexedGrammar
-	steer          *AutoSteerer
+	steer          *AdaptiveSteerer
 	MaxProbability float64
 	MinProbability float64
 	seqCounter     atomic.Int64
@@ -248,7 +248,7 @@ func (q *PcfgQueue) effective(pt []packedNode, trained float64) float64 {
 }
 
 // reweight heap keys on the popper goroutine
-func (q *PcfgQueue) applyAutoBatch(batch autoBatch) {
+func (q *PcfgQueue) applyAdaptiveBatch(batch adaptiveBatch) {
 	if q.steer == nil {
 		return
 	}

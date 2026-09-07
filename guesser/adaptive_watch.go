@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-const autoPollInterval = 300 * time.Second
+const adaptivePollInterval = 300 * time.Second
 
-type autoWatcher struct {
+type adaptiveWatcher struct {
 	path     string
 	interval time.Duration
 	minCount int
@@ -23,35 +23,35 @@ type autoWatcher struct {
 	classify func(string) (string, bool)
 }
 
-func startAutoWatcher(ctx context.Context, path string, debug bool, interval time.Duration, minCount int, classify func(string) (string, bool)) (<-chan autoBatch, error) {
+func startAdaptiveWatcher(ctx context.Context, path string, debug bool, interval time.Duration, minCount int, classify func(string) (string, bool)) (<-chan adaptiveBatch, error) {
 	if interval <= 0 {
-		interval = autoPollInterval
+		interval = adaptivePollInterval
 	}
 	if minCount <= 0 {
-		minCount = autoMinFounds
+		minCount = adaptiveMinFounds
 	}
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, fmt.Errorf("opening -auto founds file: %w", err)
+		return nil, fmt.Errorf("opening -adaptive founds file: %w", err)
 	}
 	if info.IsDir() {
-		return nil, fmt.Errorf("-auto path is a directory: %s", path)
+		return nil, fmt.Errorf("-adaptive path is a directory: %s", path)
 	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("opening -auto founds file: %w", err)
+		return nil, fmt.Errorf("opening -adaptive founds file: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		return nil, fmt.Errorf("opening -auto founds file: %w", err)
+		return nil, fmt.Errorf("opening -adaptive founds file: %w", err)
 	}
 
 	if classify == nil {
 		classify = classifyPassword
 	}
 
-	w := &autoWatcher{
+	w := &adaptiveWatcher{
 		path:     path,
 		interval: interval,
 		minCount: minCount,
@@ -61,12 +61,12 @@ func startAutoWatcher(ctx context.Context, path string, debug bool, interval tim
 		classify: classify,
 	}
 
-	ch := make(chan autoBatch, 2)
+	ch := make(chan adaptiveBatch, 2)
 	go w.loop(ctx, ch)
 	return ch, nil
 }
 
-func (w *autoWatcher) loop(ctx context.Context, ch chan<- autoBatch) {
+func (w *adaptiveWatcher) loop(ctx context.Context, ch chan<- adaptiveBatch) {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
@@ -76,16 +76,16 @@ func (w *autoWatcher) loop(ctx context.Context, ch chan<- autoBatch) {
 			return
 		case <-ticker.C:
 			if err := w.poll(); err != nil {
-				fmt.Fprintf(os.Stderr, "[auto] read error: %v\n", err)
+				fmt.Fprintf(os.Stderr, "[adaptive] read error: %v\n", err)
 				continue
 			}
 			if w.pendingN < w.minCount {
 				if w.debug {
-					fmt.Fprintf(os.Stderr, "[auto] pending founds: %d (need %d)\n", w.pendingN, w.minCount)
+					fmt.Fprintf(os.Stderr, "[adaptive] pending founds: %d (need %d)\n", w.pendingN, w.minCount)
 				}
 				continue
 			}
-			batch := autoBatch{counts: w.pending, n: w.pendingN}
+			batch := adaptiveBatch{counts: w.pending, n: w.pendingN}
 			select {
 			case ch <- batch:
 				w.pending = make(map[string]int)
@@ -97,7 +97,7 @@ func (w *autoWatcher) loop(ctx context.Context, ch chan<- autoBatch) {
 	}
 }
 
-func (w *autoWatcher) poll() error {
+func (w *adaptiveWatcher) poll() error {
 	f, err := os.Open(w.path)
 	if err != nil {
 		return err
@@ -112,7 +112,7 @@ func (w *autoWatcher) poll() error {
 	if size < w.offset {
 		// file truncated/replaced; skip existing contents
 		if w.debug {
-			fmt.Fprintf(os.Stderr, "[auto] founds file truncated; ignoring existing contents\n")
+			fmt.Fprintf(os.Stderr, "[adaptive] founds file truncated; ignoring existing contents\n")
 		}
 		w.offset = size
 		w.partial = w.partial[:0]
@@ -158,7 +158,7 @@ func (w *autoWatcher) poll() error {
 	return nil
 }
 
-func (w *autoWatcher) ingestLine(line []byte) {
+func (w *adaptiveWatcher) ingestLine(line []byte) {
 	plain, ok := extractFoundsPlaintext(line)
 	if !ok {
 		return

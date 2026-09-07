@@ -4,7 +4,6 @@
    URL: https://github.com/cyclone-github/
    Repo: https://github.com/cyclone-github/pcfg-go/
    Credits: https://github.com/lakiw/pcfg_cracker/
-   Version: 0.6.1-dev.20260906-1417 (Go)
 */
 
 package main
@@ -22,7 +21,7 @@ import (
 	"github.com/cyclone-github/pcfg-go/guesser/omen"
 )
 
-const version = "0.6.1-dev.20260906-1417 (Go)"
+const version = "0.6.1-dev.20260907-1815 (Go)"
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -38,7 +37,7 @@ func main() {
 	skipBrute := flag.Bool("b", false, "Skip OMEN/Markov guesses")
 	allLower := flag.Bool("a", false, "No case mangling")
 	debug := flag.Bool("d", false, "Debug output instead of guesses")
-	autoFile := flag.String("auto", "", "Auto/adaptive PCFG steering using recovered founds")
+	adaptiveFile := flag.String("adaptive", "", "Adaptive PCFG steering using recovered founds")
 
 	flag.Parse()
 
@@ -53,9 +52,45 @@ func main() {
 		os.Exit(0)
 	}
 	if *versionFlag {
-		fmt.Fprintln(os.Stderr, "PCFG Guesser v0.6.1-dev.20260906-1417 (Go)")
+		fmt.Fprintf(os.Stderr, "PCFG Guesser v%s\n", version)
 		fmt.Fprintln(os.Stderr, "https://github.com/cyclone-github/pcfg-go/")
 		os.Exit(0)
+	}
+
+	if flag.NArg() != 0 {
+		fmt.Fprintf(os.Stderr, "Error: unexpected positional argument: %s\n", flag.Arg(0))
+		flag.Usage()
+		os.Exit(1)
+	}
+	if *rule == "" {
+		fmt.Fprintln(os.Stderr, "Error: -r (rule) cannot be empty")
+		os.Exit(1)
+	}
+	if *session == "" {
+		fmt.Fprintln(os.Stderr, "Error: -s (session) cannot be empty")
+		os.Exit(1)
+	}
+	if *limit < 0 {
+		fmt.Fprintln(os.Stderr, "Error: -n (limit) must be 0 or greater")
+		os.Exit(1)
+	}
+	if *adaptiveFile != "" {
+		if st, err := os.Stat(*adaptiveFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot open -adaptive founds file: %v\n", err)
+			os.Exit(1)
+		} else if st.IsDir() {
+			fmt.Fprintf(os.Stderr, "Error: -adaptive path is a directory: %s\n", *adaptiveFile)
+			os.Exit(1)
+		}
+		f, err := os.Open(*adaptiveFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot read -adaptive founds file: %v\n", err)
+			os.Exit(1)
+		}
+		if err := f.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot read -adaptive founds file: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	exe, _ := os.Executable()
@@ -139,24 +174,8 @@ func main() {
 		gen = guesser.NewParallelGuessGenerator(g, base, omenGrammar, *debug)
 	}
 
-	if *autoFile != "" {
-		if st, err := os.Stat(*autoFile); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot open -auto founds file: %v\n", err)
-			os.Exit(1)
-		} else if st.IsDir() {
-			fmt.Fprintf(os.Stderr, "Error: -auto path is a directory: %s\n", *autoFile)
-			os.Exit(1)
-		}
-		f, err := os.Open(*autoFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot read -auto founds file: %v\n", err)
-			os.Exit(1)
-		}
-		if err := f.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot read -auto founds file: %v\n", err)
-			os.Exit(1)
-		}
-		gen.SetAuto(*autoFile)
+	if *adaptiveFile != "" {
+		gen.SetAdaptive(*adaptiveFile)
 	}
 
 	totalGuesses, err := gen.RunParallelWithSession(*limit, savePath, info.RuleName, info.UUID, *skipBrute, *allLower)

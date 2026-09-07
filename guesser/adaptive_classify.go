@@ -5,7 +5,7 @@ import (
 	"github.com/cyclone-github/pcfg-go/trainer/parser"
 )
 
-func newAutoParser(ig *IndexedGrammar) *trainer.PCFGParser {
+func newAdaptiveParser(ig *IndexedGrammar) *trainer.PCFGParser {
 	return trainer.NewPCFGParser(multiwordFromIndexed(ig))
 }
 

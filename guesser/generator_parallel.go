@@ -29,10 +29,10 @@ const (
 	batchCap       = batchSize * 2 // worker scratch / pooled buffer capacity
 	writerBufSize  = 64 * 1024     // stdout bufio
 
-	// shallower pipe when -auto so founds line up with current heap, not a minutes-old backlog
-	autoPtChanSize     = 2
-	autoOutputChanSize = 4
-	autoWriterBufSize  = 32 * 1024
+	// shallower pipe when -adaptive so founds line up with current heap, not a minutes-old backlog
+	adaptivePtChanSize     = 2
+	adaptiveOutputChanSize = 4
+	adaptiveWriterBufSize  = 32 * 1024
 )
 
 // reused 64KB output batches to avoid a heap alloc+copy on every flush
@@ -96,12 +96,12 @@ type ParallelGuessGenerator struct {
 	prevRunningTime      int64
 	originalFirstStarted string // RFC3339, preserved when resuming
 
-	autoPath string
+	adaptivePath string
 }
 
-func (g *ParallelGuessGenerator) applyAutoUpdate(batch autoBatch) {
-	g.Queue.applyAutoBatch(batch)
-	fmt.Fprintf(os.Stderr, "[auto] %d new founds analyzed, PCFG priorities updated\n", batch.n)
+func (g *ParallelGuessGenerator) applyAdaptiveUpdate(batch adaptiveBatch) {
+	g.Queue.applyAdaptiveBatch(batch)
+	fmt.Fprintf(os.Stderr, "[adaptive] %d new founds analyzed, PCFG priorities updated\n", batch.n)
 	if g.Queue.steer == nil {
 		return
 	}
@@ -109,7 +109,7 @@ func (g *ParallelGuessGenerator) applyAutoUpdate(batch autoBatch) {
 	if len(tops) == 0 {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "[auto] top boosts:")
+	fmt.Fprintf(os.Stderr, "[adaptive] top boosts:")
 	for i, t := range tops {
 		if i > 0 {
 			fmt.Fprint(os.Stderr, ",")
@@ -119,8 +119,8 @@ func (g *ParallelGuessGenerator) applyAutoUpdate(batch autoBatch) {
 	fmt.Fprintln(os.Stderr)
 }
 
-func (g *ParallelGuessGenerator) SetAuto(path string) {
-	g.autoPath = path
+func (g *ParallelGuessGenerator) SetAdaptive(path string) {
+	g.adaptivePath = path
 }
 
 // creates a generator that uses parallel workers
@@ -177,16 +177,16 @@ func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, r
 		}
 	}()
 
-	var autoCh <-chan autoBatch
-	if g.autoPath != "" {
-		g.Queue.steer = newAutoSteerer(g.Base)
-		ch, err := startAutoWatcher(ctx, g.autoPath, g.Debug, autoPollInterval, autoMinFounds, newAutoParser(g.Queue.IndexedGrammar()).BaseStructureOf)
+	var adaptiveCh <-chan adaptiveBatch
+	if g.adaptivePath != "" {
+		g.Queue.steer = newAdaptiveSteerer(g.Base)
+		ch, err := startAdaptiveWatcher(ctx, g.adaptivePath, g.Debug, adaptivePollInterval, adaptiveMinFounds, newAdaptiveParser(g.Queue.IndexedGrammar()).BaseStructureOf)
 		if err != nil {
 			cancel()
 			return 0, err
 		}
-		autoCh = ch
-		fmt.Fprintln(os.Stderr, "[auto] running")
+		adaptiveCh = ch
+		fmt.Fprintln(os.Stderr, "[adaptive] running")
 	}
 
 	// always save on exit: normal, signal, or panic. Works for first run and -l (load)
@@ -207,11 +207,11 @@ func (g *ParallelGuessGenerator) RunParallelWithSession(limit int64, savePath, r
 		}
 	}()
 
-	return g.runParallelWithCtx(ctx, limit, cancel, autoCh, &interrupted, interruptCh)
+	return g.runParallelWithCtx(ctx, limit, cancel, adaptiveCh, &interrupted, interruptCh)
 }
 
 // stops the popper and workers (SIGINT/SIGTERM, broken pipe, or -n limit reached)
-func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit int64, cancelRun func(), autoCh <-chan autoBatch, interrupted *atomic.Bool, interruptCh <-chan struct{}) (int64, error) {
+func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit int64, cancelRun func(), adaptiveCh <-chan adaptiveBatch, interrupted *atomic.Bool, interruptCh <-chan struct{}) (int64, error) {
 	numWorkers := runtime.NumCPU()
 	if numWorkers < 1 {
 		numWorkers = 1
@@ -220,8 +220,8 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 	ig := g.Queue.IndexedGrammar()
 
 	ptBuf, outBuf, wrBuf := ptChanSize, outputChanSize, writerBufSize
-	if g.autoPath != "" {
-		ptBuf, outBuf, wrBuf = autoPtChanSize, autoOutputChanSize, autoWriterBufSize
+	if g.adaptivePath != "" {
+		ptBuf, outBuf, wrBuf = adaptivePtChanSize, adaptiveOutputChanSize, adaptiveWriterBufSize
 	}
 	g.outputChan = make(chan []byte, outBuf)
 	writer := bufio.NewWriterSize(os.Stdout, wrBuf)
@@ -253,12 +253,12 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 		defer popperWg.Done()
 		defer close(ptChan)
 		for {
-			if autoCh != nil {
+			if adaptiveCh != nil {
 				select {
 				case <-ctx.Done():
 					return
-				case batch := <-autoCh:
-					g.applyAutoUpdate(batch)
+				case batch := <-adaptiveCh:
+					g.applyAdaptiveUpdate(batch)
 				default:
 				}
 			} else {
@@ -282,15 +282,15 @@ func (g *ParallelGuessGenerator) runParallelWithCtx(ctx context.Context, limit i
 				releasePTWork(ptItem)
 				continue
 			}
-			if autoCh != nil {
-				// stay responsive to -auto while blocked on a slow hashcat pipe
+			if adaptiveCh != nil {
+				// stay responsive to -adaptive while blocked on a slow hashcat pipe
 				for sent := false; !sent; {
 					select {
 					case <-ctx.Done():
 						releasePTWork(ptItem)
 						return
-					case batch := <-autoCh:
-						g.applyAutoUpdate(batch)
+					case batch := <-adaptiveCh:
+						g.applyAdaptiveUpdate(batch)
 					case ptChan <- ptItem:
 						sent = true
 					}

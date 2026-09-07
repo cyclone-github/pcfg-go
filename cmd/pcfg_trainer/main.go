@@ -4,7 +4,6 @@
    URL: https://github.com/cyclone-github/
    Repo: https://github.com/cyclone-github/pcfg-go/
    Credits: https://github.com/lakiw/pcfg_cracker/
-   Version: 0.6.1-dev.20260906-1417 (Go)
 */
 
 package main
@@ -13,6 +12,7 @@ import (
 	"encoding/base64"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,6 +23,8 @@ import (
 	"github.com/cyclone-github/pcfg-go/trainer"
 	"github.com/cyclone-github/pcfg-go/trainer/parser"
 )
+
+const version = "0.6.1-dev.20260907-1815 (Go)"
 
 func printBanner() {
 	fmt.Println()
@@ -100,7 +102,7 @@ func main() {
 
 	info := &trainer.ProgramInfo{
 		Name:         "PCFG Trainer",
-		Version:      "0.6.1-dev.20260906-1417 (Go)",
+		Version:      version,
 		Author:       "cyclone",
 		Contact:      "https://github.com/cyclone-github/",
 		RuleName:     "Default",
@@ -136,15 +138,52 @@ func main() {
 		os.Exit(0)
 	}
 	if *versionFlag {
-		fmt.Fprintln(os.Stderr, "PCFG Trainer v0.6.1-dev.20260906-1417 (Go)")
+		fmt.Fprintf(os.Stderr, "PCFG Trainer v%s\n", version)
 		fmt.Fprintln(os.Stderr, "https://github.com/cyclone-github/pcfg-go/")
 		os.Exit(0)
 	}
 
+	if flag.NArg() != 0 {
+		fmt.Fprintf(os.Stderr, "Error: unexpected positional argument: %s\n", flag.Arg(0))
+		flag.Usage()
+		os.Exit(1)
+	}
+	if *rule == "" {
+		fmt.Fprintln(os.Stderr, "Error: -r (rule) cannot be empty")
+		os.Exit(1)
+	}
 	if *training == "" {
 		fmt.Fprintln(os.Stderr, "Error: -t (training) is required")
 		flag.Usage()
 		os.Exit(1)
+	}
+	if *ngram < 2 || *ngram > 5 {
+		fmt.Fprintln(os.Stderr, "Error: -n (ngram) must be between 2 and 5")
+		os.Exit(1)
+	}
+	if *alphabetSize <= 0 {
+		fmt.Fprintln(os.Stderr, "Error: -a (alphabet) must be greater than 0")
+		os.Exit(1)
+	}
+	if math.IsNaN(*coverage) || math.IsInf(*coverage, 0) || *coverage < 0 || *coverage > 1 {
+		fmt.Fprintln(os.Stderr, "Error: -c (coverage) must be between 0.0 and 1.0")
+		os.Exit(1)
+	}
+	if st, err := os.Stat(*training); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot open -t training file: %v\n", err)
+		os.Exit(1)
+	} else if st.IsDir() {
+		fmt.Fprintf(os.Stderr, "Error: -t training path is a directory: %s\n", *training)
+		os.Exit(1)
+	}
+	if *multiword != "" {
+		if st, err := os.Stat(*multiword); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot open -m multiword file: %v\n", err)
+			os.Exit(1)
+		} else if st.IsDir() {
+			fmt.Fprintf(os.Stderr, "Error: -m multiword path is a directory: %s\n", *multiword)
+			os.Exit(1)
+		}
 	}
 
 	info.RuleName = *rule

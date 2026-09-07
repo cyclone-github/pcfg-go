@@ -8,26 +8,26 @@ import (
 )
 
 const (
-	autoAlpha      = 0.20
-	autoRetain     = 1.0 - autoAlpha
-	autoMinMult    = 0.75
-	autoMaxMult    = 1.50
-	autoMinFounds  = 100
-	autoPriorFloor = 1e-12
+	adaptiveAlpha      = 0.20
+	adaptiveRetain     = 1.0 - adaptiveAlpha
+	adaptiveMinMult    = 0.75
+	adaptiveMaxMult    = 1.50
+	adaptiveMinFounds  = 100
+	adaptivePriorFloor = 1e-12
 )
 
 // runtime multipliers over trained structure keys; missing keys are 1.0
-type AutoSteerer struct {
+type AdaptiveSteerer struct {
 	prior map[string]float64
 	state map[string]float64
 }
 
-type autoBatch struct {
+type adaptiveBatch struct {
 	counts map[string]int
 	n      int
 }
 
-func newAutoSteerer(base []pcfg.BaseStructure) *AutoSteerer {
+func newAdaptiveSteerer(base []pcfg.BaseStructure) *AdaptiveSteerer {
 	prior := make(map[string]float64, len(base))
 	for i := range base {
 		key := coreStructure(base[i].Replacements)
@@ -41,13 +41,13 @@ func newAutoSteerer(base []pcfg.BaseStructure) *AutoSteerer {
 	for _, p := range prior {
 		pcfgMass += p
 	}
-	if pcfgMass > autoPriorFloor {
+	if pcfgMass > adaptivePriorFloor {
 		for key, p := range prior {
 			prior[key] = p / pcfgMass
 		}
 	}
 
-	return &AutoSteerer{
+	return &AdaptiveSteerer{
 		prior: prior,
 		state: make(map[string]float64),
 	}
@@ -75,7 +75,7 @@ func coreStructure(replacements []string) string {
 	return string(b)
 }
 
-func (s *AutoSteerer) Multiplier(key string) float64 {
+func (s *AdaptiveSteerer) Multiplier(key string) float64 {
 	if s == nil || key == "" {
 		return 1
 	}
@@ -86,8 +86,8 @@ func (s *AutoSteerer) Multiplier(key string) float64 {
 	return clampMult(m)
 }
 
-func (s *AutoSteerer) ApplyBatch(counts map[string]int, n int) {
-	if s == nil || n < autoMinFounds || n <= 0 {
+func (s *AdaptiveSteerer) ApplyBatch(counts map[string]int, n int) {
+	if s == nil || n < adaptiveMinFounds || n <= 0 {
 		return
 	}
 
@@ -99,7 +99,7 @@ func (s *AutoSteerer) ApplyBatch(counts map[string]int, n int) {
 			continue
 		}
 		prior, ok := s.prior[key]
-		if !ok || prior < autoPriorFloor {
+		if !ok || prior < adaptivePriorFloor {
 			continue
 		}
 		obs := float64(c) * invN
@@ -109,7 +109,7 @@ func (s *AutoSteerer) ApplyBatch(counts map[string]int, n int) {
 		if v, ok := s.state[key]; ok {
 			prev = v
 		}
-		s.state[key] = clampMult(autoRetain*prev + autoAlpha*lift)
+		s.state[key] = clampMult(adaptiveRetain*prev + adaptiveAlpha*lift)
 		seen[key] = struct{}{}
 	}
 
@@ -117,7 +117,7 @@ func (s *AutoSteerer) ApplyBatch(counts map[string]int, n int) {
 		if _, ok := seen[key]; ok {
 			continue
 		}
-		next := clampMult(autoRetain*prev + autoAlpha*1.0)
+		next := clampMult(adaptiveRetain*prev + adaptiveAlpha*1.0)
 		if math.Abs(next-1.0) < 1e-9 {
 			delete(s.state, key)
 			continue
@@ -126,21 +126,21 @@ func (s *AutoSteerer) ApplyBatch(counts map[string]int, n int) {
 	}
 }
 
-type autoBoost struct {
+type adaptiveBoost struct {
 	Key  string
 	Mult float64
 }
 
-func (s *AutoSteerer) topBoosts(k int) []autoBoost {
+func (s *AdaptiveSteerer) topBoosts(k int) []adaptiveBoost {
 	if s == nil || k <= 0 {
 		return nil
 	}
-	out := make([]autoBoost, 0, len(s.state))
+	out := make([]adaptiveBoost, 0, len(s.state))
 	for key, m := range s.state {
 		if m <= 1.0+1e-9 {
 			continue
 		}
-		out = append(out, autoBoost{Key: key, Mult: m})
+		out = append(out, adaptiveBoost{Key: key, Mult: m})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Mult != out[j].Mult {
@@ -158,11 +158,11 @@ func clampMult(v float64) float64 {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return 1
 	}
-	if v < autoMinMult {
-		return autoMinMult
+	if v < adaptiveMinMult {
+		return adaptiveMinMult
 	}
-	if v > autoMaxMult {
-		return autoMaxMult
+	if v > adaptiveMaxMult {
+		return adaptiveMaxMult
 	}
 	return v
 }

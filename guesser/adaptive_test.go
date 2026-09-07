@@ -92,7 +92,7 @@ func TestClassifyUsesTrainerMultiword(t *testing.T) {
 		"A5": {{Values: []string{"hello", "world"}, Prob: 1}},
 	}
 	ig := newIndexedGrammar(g, []pcfg.BaseStructure{{Prob: 1, Replacements: []string{"A5"}}})
-	p := newAutoParser(ig)
+	p := newAdaptiveParser(ig)
 	key, ok := p.BaseStructureOf("helloworld")
 	if !ok || key != "A5A5" {
 		t.Fatalf("seeded multiword helloworld -> %q ok=%v, want A5A5", key, ok)
@@ -112,13 +112,13 @@ func TestClassifyRejectsEmptyAndControls(t *testing.T) {
 	}
 }
 
-func TestAutoPriorNormalization(t *testing.T) {
+func TestAdaptivePriorNormalization(t *testing.T) {
 	base := []pcfg.BaseStructure{
 		{Prob: 0.12, Replacements: []string{"A5", "D4"}},
 		{Prob: 0.48, Replacements: []string{"A6"}},
 		{Prob: 0.40, Replacements: []string{"M"}},
 	}
-	s := newAutoSteerer(base)
+	s := newAdaptiveSteerer(base)
 
 	if got := s.prior["A5D4"]; math.Abs(got-0.20) > 1e-12 {
 		t.Fatalf("A5D4 prior=%v want 0.20", got)
@@ -136,13 +136,13 @@ func TestAutoPriorNormalization(t *testing.T) {
 	}
 }
 
-func TestAutoMatchingDistributionStaysNeutral(t *testing.T) {
+func TestAdaptiveMatchingDistributionStaysNeutral(t *testing.T) {
 	base := []pcfg.BaseStructure{
 		{Prob: 0.12, Replacements: []string{"A5", "D4"}},
 		{Prob: 0.48, Replacements: []string{"A6"}},
 		{Prob: 0.40, Replacements: []string{"M"}},
 	}
-	s := newAutoSteerer(base)
+	s := newAdaptiveSteerer(base)
 	s.ApplyBatch(map[string]int{"A5D4": 20, "A6": 80}, 100)
 
 	if got := s.Multiplier("A5D4"); math.Abs(got-1.0) > 1e-12 {
@@ -154,7 +154,7 @@ func TestAutoMatchingDistributionStaysNeutral(t *testing.T) {
 }
 
 func TestSmoothingAndBounds(t *testing.T) {
-	s := &AutoSteerer{
+	s := &AdaptiveSteerer{
 		prior: map[string]float64{"A5D4": 0.05, "A6D4": 0.10, "D4A4": 0.20},
 		state: map[string]float64{},
 	}
@@ -166,10 +166,10 @@ func TestSmoothingAndBounds(t *testing.T) {
 
 	s.ApplyBatch(map[string]int{"A5D4": 100}, 100)
 	m := s.Multiplier("A5D4")
-	if m <= 1.0 || m > autoMaxMult {
+	if m <= 1.0 || m > adaptiveMaxMult {
 		t.Fatalf("first batch multiplier %v", m)
 	}
-	if m > 1.0+autoAlpha*(autoMaxMult-1.0)+1e-9 {
+	if m > 1.0+adaptiveAlpha*(adaptiveMaxMult-1.0)+1e-9 {
 		t.Fatalf("single burst dominated: %v", m)
 	}
 
@@ -183,13 +183,13 @@ func TestSmoothingAndBounds(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		s.ApplyBatch(map[string]int{"A5D4": 100}, 100)
 	}
-	if s.Multiplier("A5D4") > autoMaxMult+1e-12 {
+	if s.Multiplier("A5D4") > adaptiveMaxMult+1e-12 {
 		t.Fatalf("exceeded max: %v", s.Multiplier("A5D4"))
 	}
 
 	s.state["A6D4"] = 0.5
 	s.ApplyBatch(map[string]int{"A5D4": 100}, 100)
-	if s.Multiplier("A6D4") < autoMinMult-1e-12 {
+	if s.Multiplier("A6D4") < adaptiveMinMult-1e-12 {
 		t.Fatalf("below min: %v", s.Multiplier("A6D4"))
 	}
 
@@ -206,12 +206,12 @@ func TestSmoothingAndBounds(t *testing.T) {
 }
 
 func TestEWMAFormula(t *testing.T) {
-	s := &AutoSteerer{
+	s := &AdaptiveSteerer{
 		prior: map[string]float64{"A4": 0.01},
 		state: map[string]float64{"A4": 1.0},
 	}
 	s.ApplyBatch(map[string]int{"A4": 100}, 100)
-	want := clampMult(autoRetain*1.0 + autoAlpha*autoMaxMult)
+	want := clampMult(adaptiveRetain*1.0 + adaptiveAlpha*adaptiveMaxMult)
 	got := s.Multiplier("A4")
 	if math.Abs(got-want) > 1e-9 {
 		t.Fatalf("got %v want %v", got, want)
@@ -234,7 +234,7 @@ func testGrammar() (pcfg.Grammar, []pcfg.BaseStructure) {
 func TestQueueReweightAndChildren(t *testing.T) {
 	g, base := testGrammar()
 	q := NewPcfgQueue(g, base)
-	q.steer = newAutoSteerer(base)
+	q.steer = newAdaptiveSteerer(base)
 
 	trainedA5D4 := 0.0
 	for _, idx := range q.heap.h {
@@ -251,7 +251,7 @@ func TestQueueReweightAndChildren(t *testing.T) {
 		t.Fatal("missing A5D4")
 	}
 
-	q.applyAutoBatch(autoBatch{counts: map[string]int{"A5D4": 100}, n: 100})
+	q.applyAdaptiveBatch(adaptiveBatch{counts: map[string]int{"A5D4": 100}, n: 100})
 	var boosted, other float64
 	for _, idx := range q.heap.h {
 		e := q.entries[idx]
@@ -294,13 +294,13 @@ func TestQueueReweightAndChildren(t *testing.T) {
 	}
 }
 
-func TestNonAutoQueueUnchanged(t *testing.T) {
+func TestNonAdaptiveQueueUnchanged(t *testing.T) {
 	g, base := testGrammar()
 	q := NewPcfgQueue(g, base)
 	for _, idx := range q.heap.h {
 		e := q.entries[idx]
 		if e.Prob != e.Trained {
-			t.Fatalf("non-auto Prob %v != Trained %v", e.Prob, e.Trained)
+			t.Fatalf("non-adaptive Prob %v != Trained %v", e.Prob, e.Trained)
 		}
 	}
 	item := q.Next()
@@ -320,7 +320,7 @@ func TestWatcherIgnoresExistingAndPartialAndThreshold(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ch, err := startAutoWatcher(ctx, path, true, 20*time.Millisecond, 100, nil)
+	ch, err := startAdaptiveWatcher(ctx, path, true, 20*time.Millisecond, 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,10 +431,10 @@ func TestSessionRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStartAutoMissingFile(t *testing.T) {
+func TestStartAdaptiveMissingFile(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, err := startAutoWatcher(ctx, filepath.Join(t.TempDir(), "nope.txt"), false, time.Second, 100, nil)
+	_, err := startAdaptiveWatcher(ctx, filepath.Join(t.TempDir(), "nope.txt"), false, time.Second, 100, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
