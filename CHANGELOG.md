@@ -1,5 +1,4 @@
-### v0.6.0-dev; 2026-08-25
-
+### v0.6.0; 2026-10-09
 - `pcfg_trainer` ~7.9× faster on full RockYou vs `v0.5.3`
 - `pcfg_guesser` ~1.2× faster with ~28% lower RAM usage at 100M guesses vs `v0.5.3`
 - Parallelized trainer passes and improved worker scheduling/merge performance
